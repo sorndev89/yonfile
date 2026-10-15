@@ -61,6 +61,11 @@ class _YonFileAppState extends State<YonFileApp> {
       theme: YonTheme.lightTheme,
       darkTheme: YonTheme.darkTheme,
       themeMode: _themeMode,
+      // Keep mouse, trackpad, touch and keyboard scrolling while hiding the
+      // automatically-added desktop scrollbar decorations.
+      scrollBehavior: const MaterialScrollBehavior().copyWith(
+        scrollbars: false,
+      ),
       home: _startupComplete
           ? HomeScreen(themeMode: _themeMode, onToggleTheme: _toggleTheme)
           : const YonFileSplashScreen(),
