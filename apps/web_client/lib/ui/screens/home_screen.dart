@@ -2,26 +2,26 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../controllers/file_transfer_controller.dart';
 import '../../core/constants/app_config.dart';
 import '../../core/theme/yon_theme.dart';
-import '../../models/file_transfer_state.dart';
 import '../../models/peer_device.dart';
 import '../../models/picked_file.dart';
-import '../../services/file_chunker_service.dart';
 import '../../services/local_signaling_host.dart';
 import '../../services/signaling_service.dart';
 import '../../services/webrtc_service.dart';
-import '../widgets/peer_avatar.dart';
+import '../widgets/home_header.dart';
 import '../widgets/pin_room_card.dart';
-import '../widgets/radar_canvas.dart';
 import '../widgets/transfer_sheet.dart';
+import '../widgets/transfer_status_panel.dart';
+import 'connection_screen.dart';
+import 'qr_scanner_screen.dart';
+import 'radar_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -40,10 +40,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late final SignalingService _signaling;
   late final WebRtcService _webrtc;
+  late final FileTransferController _fileTransfers;
   final LocalSignalingHost _localHost = LocalSignalingHost();
   late final String _onlineSignalingUrl;
-  final FileChunkerService _chunker = FileChunkerService();
-  final math.Random _random = math.Random.secure();
 
   final List<StreamSubscription<dynamic>> _subs = [];
 
@@ -56,25 +55,14 @@ class _HomeScreenState extends State<HomeScreen> {
   String _myName = 'ອຸປະກອນຂອງຂ້ອຍ';
   PeerDeviceType _myDeviceType = PeerDeviceType.desktop;
   bool _deviceTypeResolved = false;
-  bool _draggingOver = false;
   bool _localHostRunning = false;
   bool _usingLocalSignaling = false;
 
   String _ownPin = _randomPin();
   String? _joinedPin;
 
-  final List<FileTransferState> _transfers = [];
-  final ValueNotifier<int> _transferRevision = ValueNotifier(0);
-  final Map<String, Uint8List> _outgoingBytes = {};
-  final Map<String, Completer<bool>> _pendingAccepts = {};
-  final Map<String, IncomingFile> _incoming = {};
-  final Map<String, String> _activeIncomingId = {};
-  final Map<String, String> _transferPeers = {};
-  final Set<String> _cancelled = {};
   final Set<String> _connectedPeerIds = {};
-
-  int get _incomingReservedBytes =>
-      _incoming.values.fold(0, (total, file) => total + file.fileSize);
+  String? _activePeerId;
 
   @override
   void initState() {
@@ -82,6 +70,11 @@ class _HomeScreenState extends State<HomeScreen> {
     _onlineSignalingUrl = AppConfig.signalingUrl;
     _signaling = SignalingService()..joinPin(_ownPin);
     _webrtc = WebRtcService(_signaling);
+    _fileTransfers = FileTransferController(
+      webrtc: _webrtc,
+      peerName: _peerName,
+      onIncomingText: _showIncomingText,
+    )..addListener(_onTransferStateChanged);
     _loadPrefs();
     _bindStreams();
     _signaling.connect();
@@ -181,15 +174,17 @@ class _HomeScreenState extends State<HomeScreen> {
       }),
     );
 
-    _subs.add(_webrtc.messages.listen(_onPeerMessage));
     _subs.add(
       _webrtc.channelStates.listen((event) {
         if (!mounted) return;
         setState(() {
           if (event.isOpen) {
             _connectedPeerIds.add(event.peerId);
+            _activePeerId ??= event.peerId;
           } else {
             _connectedPeerIds.remove(event.peerId);
+            if (_activePeerId == event.peerId) _activePeerId = null;
+            _fileTransfers.onPeerDisconnected(event.peerId);
           }
         });
       }),
@@ -201,11 +196,15 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final sub in _subs) {
       sub.cancel();
     }
+    _fileTransfers.dispose();
     _webrtc.dispose();
     _signaling.dispose();
     _localHost.stop();
-    _transferRevision.dispose();
     super.dispose();
+  }
+
+  void _onTransferStateChanged() {
+    if (mounted) setState(() {});
   }
 
   /* ------------------------------- Peers ------------------------------- */
@@ -228,12 +227,26 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'YonFile';
   }
 
+  static String _randomPin() {
+    final random = math.Random.secure();
+    return List.generate(6, (_) => random.nextInt(10)).join();
+  }
+
   PeerDevice get _selfDevice => PeerDevice(
     id: _peerId ?? 'self',
     name: _myName,
     deviceType: _myDeviceType,
     scope: PeerScope.lan,
   );
+
+  PeerDevice? get _activePeer {
+    final id = _activePeerId;
+    if (id == null) return null;
+    for (final peer in _peers) {
+      if (peer.id == id) return peer;
+    }
+    return null;
+  }
 
   /* --------------------------- File sending ---------------------------- */
 
@@ -305,16 +318,14 @@ class _HomeScreenState extends State<HomeScreen> {
         await _webrtc.connect(peer.id);
         await _webrtc.waitUntilOpen(peer.id);
       }
+      if (mounted) setState(() => _activePeerId = peer.id);
     } catch (error) {
       await _webrtc.closeSession(peer.id);
       _snack('ເຊື່ອມຕໍ່ກັບ ${peer.name} ບໍ່ສຳເລັດ ກະລຸນາລອງໃໝ່');
       debugPrint('connect error: $error');
       return;
     }
-    _openTransferSheet();
-    for (final file in files) {
-      await _sendSingleFile(peer, file);
-    }
+    await _fileTransfers.sendFiles(peer, files);
   }
 
   Future<bool> _ensurePinAccess(PeerDevice peer) async {
@@ -379,344 +390,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return false;
   }
 
-  Future<void> _sendSingleFile(PeerDevice peer, PickedFile file) async {
-    final id = _generateId();
-    final completer = Completer<bool>();
-    _pendingAccepts[id] = completer;
-    _outgoingBytes[id] = file.bytes;
-    _transferPeers[id] = peer.id;
-
-    _upsertTransfer(
-      FileTransferState(
-        id: id,
-        fileName: file.name,
-        fileSize: file.size,
-        direction: TransferDirection.send,
-        peerName: peer.name,
-        status: TransferStatus.awaitingAccept,
-        startedAt: DateTime.now(),
-      ),
-    );
-
-    try {
-      await _webrtc.sendText(
-        peer.id,
-        jsonEncode({
-          'type': 'offer-file',
-          'id': id,
-          'name': file.name,
-          'size': file.size,
-          'mime': file.mimeType,
-        }),
-      );
-
-      final accepted = await completer.future.timeout(
-        const Duration(seconds: 90),
-        onTimeout: () => false,
-      );
-
-      if (!accepted) {
-        _updateTransfer(
-          id,
-          (t) => t.copyWith(status: TransferStatus.cancelled),
-        );
-        return;
-      }
-
-      final sha = _chunker.sha256Of(file.bytes);
-      _updateTransfer(
-        id,
-        (t) => t.copyWith(status: TransferStatus.transferring, sha256: sha),
-      );
-
-      final stopwatch = Stopwatch()..start();
-      await _chunker.sendFile(
-        bytes: file.bytes,
-        sendChunk: (chunk) => _webrtc.sendBinary(peer.id, chunk),
-        bufferedAmount: () => _webrtc.bufferedAmount(peer.id),
-        onProgress: (sent) {
-          final seconds = stopwatch.elapsedMilliseconds / 1000.0;
-          _updateTransfer(
-            id,
-            (t) => t.copyWith(
-              transferred: sent,
-              bytesPerSecond: seconds > 0.2 ? sent / seconds : 0,
-            ),
-          );
-        },
-        isCancelled: () => _cancelled.contains(id),
-      );
-
-      await _webrtc.sendText(
-        peer.id,
-        jsonEncode({'type': 'eof', 'id': id, 'sha256': sha}),
-      );
-      _updateTransfer(
-        id,
-        (t) => t.copyWith(
-          status: TransferStatus.verifying,
-          transferred: file.size,
-        ),
-      );
-    } on TransferCancelledException {
-      _updateTransfer(id, (t) => t.copyWith(status: TransferStatus.cancelled));
-      await _webrtc.sendText(
-        peer.id,
-        jsonEncode({'type': 'cancel-file', 'id': id}),
-      );
-    } catch (error) {
-      _updateTransfer(
-        id,
-        (t) => t.copyWith(status: TransferStatus.failed, error: '$error'),
-      );
-    } finally {
-      _outgoingBytes.remove(id);
-      _transferPeers.remove(id);
-      _cancelled.remove(id);
-      _pendingAccepts.remove(id);
-    }
-  }
-
-  /* -------------------------- Message handling ------------------------- */
-
-  void _onPeerMessage(PeerMessage message) {
-    if (message.isBinary) {
-      _onBinary(message.peerId, message.binary);
-      return;
-    }
-
-    Map<String, dynamic> data;
-    try {
-      data = jsonDecode(message.text) as Map<String, dynamic>;
-    } catch (_) {
-      return;
-    }
-
-    switch (data['type']) {
-      case 'offer-file':
-        _onOfferFile(message.peerId, data);
-        break;
-      case 'accept-file':
-        final acceptId = data['id'];
-        if (acceptId is String &&
-            _pendingAccepts[acceptId]?.isCompleted == false) {
-          _pendingAccepts[acceptId]!.complete(true);
-        }
-        break;
-      case 'reject-file':
-        final rejectId = data['id'];
-        if (rejectId is String &&
-            _pendingAccepts[rejectId]?.isCompleted == false) {
-          _pendingAccepts[rejectId]!.complete(false);
-        }
-        break;
-      case 'eof':
-        _onEof(message.peerId, data);
-        break;
-      case 'transfer-complete':
-        _onTransferComplete(data);
-        break;
-      case 'cancel-file':
-        _onRemoteCancel(data);
-        break;
-      case 'text':
-        if (data['text'] is String) {
-          _showIncomingText(message.peerId, data['text'] as String);
-        }
-        break;
-    }
-  }
-
-  void _onBinary(String peerId, Uint8List bytes) {
-    final id = _activeIncomingId[peerId];
-    if (id == null) return;
-    final incoming = _incoming[id];
-    if (incoming == null) return;
-    if (bytes.isEmpty || incoming.received + bytes.length > incoming.fileSize) {
-      _incoming.remove(id);
-      _activeIncomingId.remove(peerId);
-      _transferPeers.remove(id);
-      _updateTransfer(
-        id,
-        (t) => t.copyWith(
-          status: TransferStatus.failed,
-          error: 'ຂໍ້ມູນໄຟລ໌ເກີນຂະໜາດທີ່ແຈ້ງ',
-        ),
-      );
-      _webrtc.sendText(peerId, jsonEncode({'type': 'cancel-file', 'id': id}));
-      return;
-    }
-    incoming.addChunk(bytes);
-    _updateTransfer(
-      id,
-      (t) => t.copyWith(
-        transferred: incoming.received,
-        bytesPerSecond: incoming.bytesPerSecond,
-      ),
-    );
-  }
-
-  Future<void> _onOfferFile(String peerId, Map<String, dynamic> data) async {
-    if (!mounted) return;
-    final id = data['id'] is String ? data['id'] as String : '';
-    final incomingName = data['name'] is String
-        ? data['name'] as String
-        : 'file';
-    final name = incomingName
-        .replaceAll(RegExp(r'[\\/\u0000-\u001f]'), '_')
-        .trim();
-    final size = data['size'] is num ? (data['size'] as num).toInt() : -1;
-    final peerName = _peerName(peerId);
-
-    if (id.isEmpty ||
-        name.isEmpty ||
-        size < 0 ||
-        size > AppConfig.maxFileSizeBytes ||
-        _incomingReservedBytes + size > AppConfig.maxFileSizeBytes ||
-        _activeIncomingId.containsKey(peerId)) {
-      await _webrtc.sendText(
-        peerId,
-        jsonEncode({'type': 'reject-file', 'id': id}),
-      );
-      return;
-    }
-
-    final accepted = await _confirmReceive(peerName, name, size);
-    if (!accepted) {
-      await _webrtc.sendText(
-        peerId,
-        jsonEncode({'type': 'reject-file', 'id': id}),
-      );
-      return;
-    }
-
-    _incoming[id] = IncomingFile(id: id, fileName: name, fileSize: size);
-    _activeIncomingId[peerId] = id;
-    _transferPeers[id] = peerId;
-    _upsertTransfer(
-      FileTransferState(
-        id: id,
-        fileName: name,
-        fileSize: size,
-        direction: TransferDirection.receive,
-        peerName: peerName,
-        status: TransferStatus.transferring,
-        startedAt: DateTime.now(),
-      ),
-    );
-    await _webrtc.sendText(
-      peerId,
-      jsonEncode({'type': 'accept-file', 'id': id}),
-    );
-  }
-
-  Future<void> _onEof(String peerId, Map<String, dynamic> data) async {
-    final id = data['id'] is String ? data['id'] as String : '';
-    if (id.isEmpty) return;
-    final incoming = _incoming[id];
-    if (incoming == null) return;
-
-    _updateTransfer(id, (t) => t.copyWith(status: TransferStatus.verifying));
-    final expected = data['sha256'] is String ? data['sha256'] as String : null;
-    final actual = sha256Hex(incoming.takeBytes());
-    final verified =
-        incoming.received == incoming.fileSize &&
-        expected != null &&
-        RegExp(r'^[0-9a-f]{64}$').hasMatch(expected) &&
-        expected == actual;
-
-    final bytes = incoming.takeBytes();
-    Uri? savedFile;
-    var saveCompleted = false;
-    try {
-      if (verified) {
-        savedFile = await FilePicker.saveFile(
-          fileName: incoming.fileName,
-          bytes: bytes,
-        );
-        // On web, FilePicker starts a browser download and intentionally
-        // returns null because the browser does not expose a filesystem URI.
-        saveCompleted = true;
-      }
-    } catch (error) {
-      debugPrint('save error: $error');
-    }
-    final completed =
-        verified && saveCompleted && (kIsWeb || savedFile != null);
-
-    await _webrtc.sendText(
-      peerId,
-      jsonEncode({
-        'type': 'transfer-complete',
-        'id': id,
-        'verified': completed,
-      }),
-    );
-
-    _updateTransfer(
-      id,
-      (t) => t.copyWith(
-        status: completed ? TransferStatus.completed : TransferStatus.failed,
-        verified: completed,
-        transferred: incoming.fileSize,
-        error: completed
-            ? null
-            : !verified
-            ? 'ຂະໜາດໄຟລ໌ ຫຼື SHA-256 ບໍ່ກົງກັນ'
-            : 'ບັນທຶກໄຟລ໌ບໍ່ສຳເລັດ ຫຼືຖືກຍົກເລີກ',
-      ),
-    );
-    _incoming.remove(id);
-    _activeIncomingId.remove(peerId);
-    _transferPeers.remove(id);
-  }
-
-  void _onTransferComplete(Map<String, dynamic> data) {
-    final id = data['id'] is String ? data['id'] as String : '';
-    if (id.isEmpty) return;
-    final verified = data['verified'] as bool? ?? true;
-    _updateTransfer(
-      id,
-      (t) => t.copyWith(
-        status: verified ? TransferStatus.completed : TransferStatus.failed,
-        verified: verified,
-        error: verified ? null : 'ປາຍທາງກວດສອບບໍ່ຜ່ານ',
-      ),
-    );
-  }
-
-  void _onRemoteCancel(Map<String, dynamic> data) {
-    final id = data['id'] is String ? data['id'] as String : '';
-    if (id.isEmpty) return;
-    if (_outgoingBytes.containsKey(id)) _cancelled.add(id);
-    final pending = _pendingAccepts[id];
-    if (pending != null && !pending.isCompleted) pending.complete(false);
-    final peerId = _transferPeers.remove(id);
-    _incoming.remove(id);
-    if (peerId != null && _activeIncomingId[peerId] == id) {
-      _activeIncomingId.remove(peerId);
-    }
-    _updateTransfer(id, (t) => t.copyWith(status: TransferStatus.cancelled));
-  }
-
   /* ------------------------------- Actions ----------------------------- */
-
-  void _cancelTransfer(String id) {
-    final index = _transfers.indexWhere((t) => t.id == id);
-    if (index < 0) return;
-    final transfer = _transfers[index];
-    if (!transfer.isActive) return;
-    _cancelled.add(id);
-    _updateTransfer(id, (t) => t.copyWith(status: TransferStatus.cancelled));
-    _pendingAccepts[id]?.complete(false);
-    final peerId = _transferPeers[id];
-    if (peerId != null) {
-      _webrtc.sendText(peerId, jsonEncode({'type': 'cancel-file', 'id': id}));
-      final isIncoming = _incoming.remove(id) != null;
-      if (isIncoming) _cancelled.remove(id);
-      if (_activeIncomingId[peerId] == id) _activeIncomingId.remove(peerId);
-    }
-  }
 
   void _joinPin(String pin) {
     _signaling.joinPin(pin);
@@ -817,7 +491,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _openScanner() async {
     final pin = await Navigator.of(
       context,
-    ).push<String>(MaterialPageRoute(builder: (_) => const _QrScannerPage()));
+    ).push<String>(MaterialPageRoute(builder: (_) => const QrScannerScreen()));
     if (pin != null && pin.length == 6) _joinPin(pin);
   }
 
@@ -825,76 +499,29 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     TransferSheet.show(
       context,
-      transfers: _transfers,
-      revision: _transferRevision,
-      onCancel: _cancelTransfer,
+      transfers: _fileTransfers.transfers,
+      revision: _fileTransfers.revision,
+      onCancel: _fileTransfers.cancelTransfer,
       onClearCompleted: () {
-        setState(() => _transfers.removeWhere((t) => !t.isActive));
-        _transferRevision.value++;
+        _fileTransfers.clearCompleted();
         Navigator.pop(context);
       },
     );
   }
 
-  /* ------------------------------- Helpers ----------------------------- */
-
-  Future<bool> _confirmReceive(
-    String peerName,
-    String fileName,
-    int size,
-  ) async {
-    if (!mounted) return false;
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('ມີໄຟລ໌ເຂົ້າມາ'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('$peerName ຕ້ອງການສົ່ງໄຟລ໌ມາໃຫ້ທ່ານ:'),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(
-                  Icons.insert_drive_file_rounded,
-                  color: YonTheme.yonOrange,
-                  size: 20,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    fileName,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              FileTransferState.formatBytes(size),
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text(
-              'ປະຕິເສດ',
-              style: TextStyle(color: YonTheme.roseRed),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('ຍອມຮັບ'),
-          ),
-        ],
-      ),
-    );
-    return result ?? false;
+  Future<void> _disconnectActivePeer() async {
+    final peerId = _activePeerId;
+    if (peerId == null) return;
+    _fileTransfers.onPeerDisconnected(peerId);
+    await _webrtc.closeSession(peerId);
+    if (!mounted) return;
+    setState(() {
+      _connectedPeerIds.remove(peerId);
+      _activePeerId = null;
+    });
   }
+
+  /* ------------------------------- Helpers ----------------------------- */
 
   Future<PeerDevice?> _choosePeerDialog() async {
     if (!mounted) return null;
@@ -948,42 +575,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _upsertTransfer(FileTransferState transfer) {
-    if (!mounted) return;
-    final index = _transfers.indexWhere((t) => t.id == transfer.id);
-    setState(() {
-      if (index >= 0) {
-        _transfers[index] = transfer;
-      } else {
-        _transfers.insert(0, transfer);
-      }
-    });
-    _transferRevision.value++;
-  }
-
-  void _updateTransfer(
-    String id,
-    FileTransferState Function(FileTransferState) update,
-  ) {
-    if (!mounted) return;
-    final index = _transfers.indexWhere((t) => t.id == id);
-    if (index < 0) return;
-    setState(() => _transfers[index] = update(_transfers[index]));
-    _transferRevision.value++;
-  }
-
-  String _generateId() =>
-      '${DateTime.now().microsecondsSinceEpoch}-${_random.nextInt(9999)}';
-
-  static String _randomPin() {
-    final random = math.Random.secure();
-    final buffer = StringBuffer();
-    for (var i = 0; i < 6; i++) {
-      buffer.write(random.nextInt(10));
-    }
-    return buffer.toString();
-  }
-
   String _guessMime(String name) {
     final ext = name.split('.').last.toLowerCase();
     switch (ext) {
@@ -1002,8 +593,6 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'application/octet-stream';
     }
   }
-
-  String sha256Hex(Uint8List bytes) => _chunker.sha256Of(bytes);
 
   Future<void> _showOfflineOptions() async {
     final action = await showDialog<String>(
@@ -1143,86 +732,24 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildTopBar() {
-    final connected = _status == SignalingStatus.connected;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 12, 12, 6),
-      child: Row(
-        children: [
-          Image.asset(
-            'assets/branding/yonfile-mark.png',
-            width: 28,
-            height: 28,
-            fit: BoxFit.contain,
-          ),
-          const SizedBox(width: 8),
-          RichText(
-            text: TextSpan(
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-              children: [
-                const TextSpan(text: 'Yon'),
-                TextSpan(
-                  text: 'File',
-                  style: TextStyle(color: YonTheme.yonOrange),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: connected ? YonTheme.emeraldGreen : YonTheme.amberGold,
-            ),
-          ),
-          const Spacer(),
-          IconButton(
-            tooltip: _usingLocalSignaling
-                ? 'ໃຊ້ signaling server ອອນລາຍ'
-                : 'ຕັ້ງຄ່າໃຊ້ງານ offline ໃນ LAN',
-            onPressed: _showOfflineOptions,
-            icon: Icon(
-              _usingLocalSignaling
-                  ? Icons.wifi_tethering_rounded
-                  : Icons.wifi_tethering_off_rounded,
-              color: _usingLocalSignaling ? YonTheme.yonOrange : null,
-            ),
-          ),
-          if (_transfers.any((t) => t.isActive))
-            _BadgeIconButton(
-              icon: Icons.swap_vert_rounded,
-              count: _transfers.where((t) => t.isActive).length,
-              onTap: _openTransferSheet,
-            ),
-          IconButton(
-            tooltip: 'ແຈ້ງເຕືອນ',
-            onPressed: _openTransferSheet,
-            icon: const Icon(Icons.history_rounded),
-          ),
-          IconButton(
-            tooltip: 'ປ່ຽນໂໝດສີ',
-            onPressed: widget.onToggleTheme,
-            icon: Icon(
-              widget.themeMode == ThemeMode.dark
-                  ? Icons.light_mode_rounded
-                  : Icons.dark_mode_rounded,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _buildTopBar() => HomeHeader(
+    signalingConnected: _status == SignalingStatus.connected,
+    usingLocalSignaling: _usingLocalSignaling,
+    activeTransferCount: _fileTransfers.transfers
+        .where((transfer) => transfer.isActive)
+        .length,
+    themeMode: widget.themeMode,
+    onOfflineSettings: _showOfflineOptions,
+    onTransferHistory: _openTransferSheet,
+    onToggleTheme: widget.onToggleTheme,
+  );
 
   Widget _buildMobile() {
     return Column(
       children: [
         _buildTopBar(),
         _buildDeviceNameRow(),
-        Expanded(child: _buildRadarArea()),
+        Expanded(child: _buildMainStage()),
         Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
@@ -1231,7 +758,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: OutlinedButton.icon(
                   onPressed: () => _showPinSheet(),
                   icon: const Icon(Icons.link_rounded),
-                  label: const Text('ໃສ່ລະຫັດຂ້າມເນັດ'),
+                  label: const Text('PIN'),
                 ),
               ),
               const SizedBox(width: 10),
@@ -1258,7 +785,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: _buildRadarArea()),
+              Expanded(child: _buildMainStage()),
               SizedBox(
                 width: 360,
                 child: Padding(
@@ -1285,166 +812,48 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildDeviceNameRow() {
-    return InkWell(
-      onTap: _editName,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
-        child: Row(
-          children: [
-            Icon(_selfDevice.icon, size: 16, color: YonTheme.yonOrange),
-            const SizedBox(width: 6),
-            Text(
-              'ຊື່ເຄື່ອງ: $_myName',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(width: 6),
-            const Icon(Icons.edit_rounded, size: 14, color: Colors.grey),
-          ],
-        ),
-      ),
+  Widget _buildMainStage() {
+    final peer = _activePeer;
+    if (peer != null && _connectedPeerIds.contains(peer.id)) {
+      return _buildConnectionStage(peer);
+    }
+    return RadarScreen(
+      self: _selfDevice,
+      peers: _peers,
+      connectedPeerIds: _connectedPeerIds,
+      signalingConnected: _status == SignalingStatus.connected,
+      onTapPeer: _pickAndSend,
+      onLongPressPeer: _sendTextMessage,
+      onDroppedFiles: _sendDroppedFiles,
+      onDropRejected: _snack,
     );
   }
 
-  Widget _buildRadarArea() {
-    return DropTarget(
-      onDragEntered: (_) => setState(() => _draggingOver = true),
-      onDragExited: (_) => setState(() => _draggingOver = false),
-      onDragDone: (details) async {
-        setState(() => _draggingOver = false);
-        final picked = <PickedFile>[];
-        var totalBytes = 0;
-        for (final item in details.files) {
-          final knownSize = await item.length();
-          if (totalBytes + knownSize > AppConfig.maxFileSizeBytes) {
-            _snack('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ 512 MB');
-            return;
-          }
-          final bytes = await item.readAsBytes();
-          if (totalBytes + bytes.length > AppConfig.maxFileSizeBytes) {
-            _snack('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ 512 MB');
-            return;
-          }
-          totalBytes += bytes.length;
-          picked.add(
-            PickedFile(
-              name: item.name,
-              size: bytes.length,
-              bytes: bytes,
-              mimeType: _guessMime(item.name),
-            ),
-          );
-        }
-        await _sendDroppedFiles(picked, null);
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        margin: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(
-            color: _draggingOver ? YonTheme.yonOrange : Colors.transparent,
-            width: 2,
-          ),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(28),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: RadarCanvas(
-                  active: _status == SignalingStatus.connected,
-                ),
-              ),
-              Positioned.fill(
-                child: _RadarPeers(
-                  self: _selfDevice,
-                  peers: _peers,
-                  connectedPeerIds: _connectedPeerIds,
-                  onTapPeer: _pickAndSend,
-                  onLongPressPeer: _sendTextMessage,
-                  onDropFiles: (peer, files) => _sendFiles(peer, files),
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 16,
-                child: Center(
-                  child: Text(
-                    _peers.isEmpty
-                        ? 'ກຳລັງຊອກຫາອຸປະກອນ...'
-                        : 'ແຕະໃສ່ອຸປະກອນເພື່ອເລືອກໄຟລ໌ · ລາກໄຟລ໌ມາວາງ',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white54
-                          : Colors.black45,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+  Widget _buildConnectionStage(PeerDevice peer) {
+    final transfers = _fileTransfers.transfersForPeer(peer.id, peer.name);
+    return ConnectionScreen(
+      self: _selfDevice,
+      peer: peer,
+      pendingOffers: _fileTransfers.pendingIncomingOffers.values
+          .where((offer) => offer.peerId == peer.id)
+          .toList(),
+      transfers: transfers,
+      hasActiveTransfer: _fileTransfers.hasActiveTransferForPeer(peer.id),
+      onSendFile: () => _pickAndSend(peer),
+      onDisconnect: _disconnectActivePeer,
+      onAccept: _fileTransfers.acceptIncomingOffer,
+      onReject: _fileTransfers.rejectIncomingOffer,
+      onCancelTransfer: _fileTransfers.cancelTransfer,
     );
   }
 
-  Widget _buildTransferPanel() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark
-            ? YonTheme.slateDarkCard.withValues(alpha: 0.8)
-            : Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: YonTheme.yonOrange.withValues(alpha: 0.25)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.bar_chart_rounded,
-                color: YonTheme.yonOrange,
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'ສະຖານະການໂຍນໄຟລ໌',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (_transfers.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              child: Center(
-                child: Text(
-                  'ຍັງບໍ່ມີການໂຍນໄຟລ໌',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark ? Colors.white54 : Colors.black45,
-                  ),
-                ),
-              ),
-            )
-          else
-            TransferSheet(
-              transfers: _transfers,
-              onCancel: _cancelTransfer,
-              showHeader: false,
-            ),
-        ],
-      ),
-    );
-  }
+  Widget _buildDeviceNameRow() =>
+      DeviceNameHeader(name: _myName, icon: _selfDevice.icon, onTap: _editName);
+
+  Widget _buildTransferPanel() => TransferStatusPanel(
+    transfers: _fileTransfers.transfers,
+    onCancel: _fileTransfers.cancelTransfer,
+  );
 
   void _showPinSheet() {
     showModalBottomSheet<void>(
@@ -1475,214 +884,6 @@ class _HomeScreenState extends State<HomeScreen> {
             },
           ),
         ),
-      ),
-    );
-  }
-}
-
-/* ------------------------------ Radar peers ------------------------------ */
-
-class _RadarPeers extends StatelessWidget {
-  const _RadarPeers({
-    required this.self,
-    required this.peers,
-    required this.connectedPeerIds,
-    required this.onTapPeer,
-    required this.onLongPressPeer,
-    required this.onDropFiles,
-  });
-
-  final PeerDevice self;
-  final List<PeerDevice> peers;
-  final Set<String> connectedPeerIds;
-  final void Function(PeerDevice) onTapPeer;
-  final void Function(PeerDevice) onLongPressPeer;
-  final void Function(PeerDevice, List<PickedFile>) onDropFiles;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final center = Offset(
-          constraints.maxWidth / 2,
-          constraints.maxHeight / 2,
-        );
-        final radius =
-            (math.min(constraints.maxWidth, constraints.maxHeight) / 2) - 70;
-
-        final widgets = <Widget>[];
-        widgets.add(
-          Positioned(
-            left: center.dx - 52,
-            top: center.dy - 52,
-            child: PeerAvatar(peer: self, isSelf: true, diameter: 88),
-          ),
-        );
-
-        final count = peers.length;
-        for (var i = 0; i < count; i++) {
-          final angle = -math.pi / 2 + (i * 2 * math.pi / count);
-          final dx = center.dx + radius * math.cos(angle) - 44;
-          final dy = center.dy + radius * math.sin(angle) - 44;
-          final peer = peers[i];
-          widgets.add(
-            Positioned(
-              left: dx,
-              top: dy,
-              child: GestureDetector(
-                onLongPress: () => onLongPressPeer(peer),
-                child: PeerAvatar(
-                  peer: peer,
-                  diameter: 76,
-                  isConnected: connectedPeerIds.contains(peer.id),
-                  onTap: () => onTapPeer(peer),
-                  onFilesDropped: (files) => onDropFiles(peer, files),
-                ),
-              ),
-            ),
-          );
-        }
-        return Stack(children: widgets);
-      },
-    );
-  }
-}
-
-/* ----------------------------- Small widgets ----------------------------- */
-
-class _BadgeIconButton extends StatelessWidget {
-  const _BadgeIconButton({
-    required this.icon,
-    required this.count,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final int count;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        IconButton(onPressed: onTap, icon: Icon(icon)),
-        Positioned(
-          right: 6,
-          top: 6,
-          child: Container(
-            padding: const EdgeInsets.all(4),
-            decoration: const BoxDecoration(
-              color: YonTheme.yonOrange,
-              shape: BoxShape.circle,
-            ),
-            constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-            child: Text(
-              '$count',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 9,
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/* ------------------------------ QR Scanner ------------------------------- */
-
-class _QrScannerPage extends StatefulWidget {
-  const _QrScannerPage();
-
-  @override
-  State<_QrScannerPage> createState() => _QrScannerPageState();
-}
-
-class _QrScannerPageState extends State<_QrScannerPage> {
-  final MobileScannerController _controller = MobileScannerController();
-  bool _handled = false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _onDetect(BarcodeCapture capture) {
-    if (_handled) return;
-    for (final barcode in capture.barcodes) {
-      final value = barcode.rawValue;
-      if (value == null) continue;
-      final digits = RegExp(r'\d{6}').firstMatch(value)?.group(0);
-      if (digits != null) {
-        _handled = true;
-        Navigator.of(context).pop(digits);
-        return;
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('ສະແກນ QR Code')),
-      body: Stack(
-        children: [
-          MobileScanner(
-            controller: _controller,
-            onDetect: _onDetect,
-            errorBuilder: (context, error) {
-              _error ??= error.errorDetails?.message ?? error.errorCode.name;
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.no_photography_rounded,
-                        size: 48,
-                        color: YonTheme.roseRed,
-                      ),
-                      const SizedBox(height: 12),
-                      const Text('ເປີດກ້ອງບໍ່ໄດ້'),
-                      const SizedBox(height: 6),
-                      Text(
-                        _error ?? 'ກະລຸນາອະນຸຍາດການໃຊ້ກ້ອງ ແລະໃຊ້ HTTPS',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: () => _controller.start(),
-                        child: const Text('ລອງໃໝ່'),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          const Positioned(
-            left: 0,
-            right: 0,
-            bottom: 24,
-            child: Center(
-              child: Text(
-                'ຈັດ QR Code ໃຫ້ຢູ່ໃນກອບ',
-                style: TextStyle(color: Colors.white70, fontSize: 13),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
