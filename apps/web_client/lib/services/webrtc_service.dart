@@ -38,6 +38,7 @@ class _PeerSession {
   bool offerStarted = false;
   final List<RTCIceCandidate> pendingCandidates = [];
   final Completer<RTCDataChannel> openCompleter = Completer<RTCDataChannel>();
+  final Completer<String> failureCompleter = Completer<String>();
 }
 
 /// WebRtcService — ຈັດການ RTCPeerConnection & RTCDataChannel ຕໍ່ peer.
@@ -81,7 +82,24 @@ class WebRtcService {
     if (session.channel?.state == RTCDataChannelState.RTCDataChannelOpen) {
       return session.channel!;
     }
-    return session.openCompleter.future.timeout(timeout);
+    try {
+      final result = await Future.any<Object>([
+        session.openCompleter.future,
+        session.failureCompleter.future,
+      ]).timeout(timeout);
+      if (result is String) throw StateError(result);
+      return result as RTCDataChannel;
+    } on TimeoutException {
+      await closeSession(peerId);
+      throw TimeoutException(
+        'WebRTC connection timed out. Check both internet connections and '
+        'confirm that the signaling server provides a reachable TURN relay.',
+        timeout,
+      );
+    } catch (_) {
+      await closeSession(peerId);
+      rethrow;
+    }
   }
 
   Future<void> sendText(String peerId, String text) async {
@@ -154,9 +172,24 @@ class WebRtcService {
       });
     };
 
+    pc.onIceConnectionState = (state) {
+      debugPrint('WebRTC ICE state ($peerId): $state');
+      if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        _failSession(
+          session,
+          'ICE negotiation failed. A TURN relay may be required for these networks.',
+        );
+      }
+    };
+
     pc.onConnectionState = (state) {
-      if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
-          state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+      debugPrint('WebRTC peer state ($peerId): $state');
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        _failSession(
+          session,
+          'Peer connection failed. Check the TURN relay and network firewall.',
+        );
+      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
         _teardown(peerId);
       }
     };
@@ -333,6 +366,16 @@ class WebRtcService {
   Future<void> closeSession(String peerId) async {
     await _sessions[peerId]?.pc.close();
     _teardown(peerId);
+  }
+
+  void _failSession(_PeerSession session, String reason) {
+    if (!session.failureCompleter.isCompleted) {
+      session.failureCompleter.complete(reason);
+    }
+    if (identical(_sessions[session.peerId], session)) {
+      unawaited(session.pc.close());
+      _teardown(session.peerId);
+    }
   }
 
   /// Closes the local session and asks the remote peer to leave this pairing.

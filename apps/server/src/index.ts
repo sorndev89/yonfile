@@ -235,18 +235,24 @@ app.get('/api/ice-servers', (req, res) => {
   }
 
   const stunUrl = process.env.STUN_URL || 'stun:stun.l.google.com:19302';
-  const turnUrl = process.env.TURN_URL;
+  // Comma-separated TURN URLs let deployments offer UDP, TCP, and TLS
+  // transports (for example turn:host:3478,turn:host:3478?transport=tcp,
+  // turns:host:5349?transport=tcp) with the same short-lived credentials.
+  const turnUrls = (process.env.TURN_URL ?? '')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
   const sharedSecret = process.env.TURN_SHARED_SECRET;
   const iceServers: Array<Record<string, string | string[]>> = [{ urls: stunUrl }];
 
-  if (turnUrl && sharedSecret && sharedSecret !== 'CHANGE_ME_TURN_SECRET') {
+  if (turnUrls.length > 0 && sharedSecret && sharedSecret !== 'CHANGE_ME_TURN_SECRET') {
     const expiresAt = Math.floor(Date.now() / 1000) + 10 * 60;
     const username = `${expiresAt}:${crypto.randomUUID()}`;
     const credential = crypto
       .createHmac('sha1', sharedSecret)
       .update(username)
       .digest('base64');
-    iceServers.push({ urls: turnUrl, username, credential });
+    iceServers.push({ urls: turnUrls, username, credential });
   }
 
   res.setHeader('Cache-Control', 'no-store');

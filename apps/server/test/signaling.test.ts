@@ -103,7 +103,8 @@ test('invalid PINs are rejected by the signaling server', async () => {
 test('ICE endpoint issues short-lived credentials and rate limits repeated requests', async () => {
   const oldUrl = process.env.TURN_URL;
   const oldSecret = process.env.TURN_SHARED_SECRET;
-  process.env.TURN_URL = 'turn:turn.example.test:3478';
+  process.env.TURN_URL =
+    'turn:turn.example.test:3478,turn:turn.example.test:3478?transport=tcp,turns:turn.example.test:5349?transport=tcp';
   process.env.TURN_SHARED_SECRET = 'test-only-shared-secret';
   try {
     for (let attempt = 0; attempt < 30; attempt++) {
@@ -117,9 +118,15 @@ test('ICE endpoint issues short-lived credentials and rate limits repeated reque
     });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
-    const body = await response.json() as { iceServers: Array<Record<string, string>> };
+    const body = await response.json() as {
+      iceServers: Array<Record<string, string | string[]>>;
+    };
     const turn = body.iceServers[1];
-    assert.equal(turn.urls, 'turn:turn.example.test:3478');
+    assert.deepEqual(turn.urls, [
+      'turn:turn.example.test:3478',
+      'turn:turn.example.test:3478?transport=tcp',
+      'turns:turn.example.test:5349?transport=tcp',
+    ]);
     const [expiry] = turn.username.split(':');
     assert.ok(Number(expiry) > Math.floor(Date.now() / 1000));
     const expected = await import('node:crypto').then(({ createHmac }) =>

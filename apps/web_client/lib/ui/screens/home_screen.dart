@@ -437,7 +437,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) setState(() => _activePeerId = peer.id);
     } catch (error) {
       await _webrtc.closeSession(peer.id);
-      _snack('ເຊື່ອມຕໍ່ກັບ ${peer.name} ບໍ່ສຳເລັດ ກະລຸນາລອງໃໝ່');
+      _snack(_connectionFailureMessage(peer.name));
       debugPrint('connect error: $error');
       return;
     }
@@ -562,9 +562,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _setActiveConnectedPeer(peer.id);
     } catch (error) {
       debugPrint('PIN peer connection failed (${peer.id}): $error');
-      if (mounted) _snack('ເຊື່ອມຕໍ່ ${peer.name} ບໍ່ສຳເລັດ ກະລຸນາລອງໃໝ່');
+      if (mounted) _snack(_connectionFailureMessage(peer.name));
     }
   }
+
+  String _connectionFailureMessage(String peerName) =>
+      'ເຊື່ອມຕໍ່ $peerName ບໍ່ສຳເລັດ. ກວດອິນເຕີເນັດຂອງທັງສອງເຄື່ອງ; '
+      'ຖ້າຢູ່ຄົນລະເຄືອຂ່າຍ ໃຫ້ກວດວ່າ server ມີ TURN relay ແລະເປີດ firewall ຄົບ.';
 
   void _setActiveConnectedPeer(String peerId) {
     if (!mounted) return;

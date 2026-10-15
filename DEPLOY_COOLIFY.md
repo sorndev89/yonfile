@@ -93,14 +93,13 @@ https://yonfile.example.com
 | :-- | :-- | :-- |
 | `PORT` | `3000` | Port ຂອງ server (ຕ້ອງກົງກັບ Ports Exposes) |
 | `STUN_URL` | `stun:stun.l.google.com:19302` | STUN server (ຟຣີ) |
-| `TURN_URL` | `turn:turn.yonfile.example.com:3478` | TURN server (ຖ້າມີ) |
+| `TURN_URL` | `turn:turn.yonfile.example.com:3478,turn:turn.yonfile.example.com:3478?transport=tcp,turns:turn.yonfile.example.com:5349?transport=tcp` | TURN URLs ຄັ່ນດ້ວຍ comma; ໃຫ້ໃສ່ transport ທີ່ provider ເປີດໃຫ້ |
 | `TURN_SHARED_SECRET` | `<random-long-secret>` | Secret ສຳລັບອອກ credentials (HMAC) — ຕ້ອງຕົງກັບ Coturn |
 | `TURN_REALM` | `turn.yonfile.example.com` | Realm ຂອງ Coturn |
 | `TRUST_PROXY` | `true` | ເປີດສະເພາະເມື່ອ reverse proxy ຂຽນທັບ forwarded IP headers ຈາກ client |
 | `ALLOWED_ORIGINS` | `https://yonfile.example.com` | Origin ເພີ່ມເຕີມສຳລັບ browser ທີ່ຢູ່ຄົນລະ host; ຄັ່ນຫຼາຍ origin ດ້ວຍ comma |
 
-> - ຖ້າ**ຍັງບໍ່ມີ TURN**, ປ່ອຍ `TURN_URL` / `TURN_SHARED_SECRET` ຫວ່າງໄດ້.
->   ລະບົບຈະໃຊ້ STUN ເທົ່ານັ້ນ (ພຽງພໍ LAN 100% ແລະ ຂ້າມເນັດທົ່ວໄປ ~80%).
+> - ຖ້າບໍ່ມີ TURN, ລະບົບຈະໃຊ້ STUN ເທົ່ານັ້ນ. ການຂ້າມ network ອາດໃຊ້ໄດ້ກັບ NAT ບາງປະເພດ ແຕ່ບໍ່ຮັບປະກັນ; ສຳລັບການໃຊ້ງານຈິງຄວນຕັ້ງ TURN relay.
 > - ສ້າງ secret ທີ່ແຂງແຮງ: `openssl rand -hex 32`.
 > - **ຢ່າ** ໃສ່ `TURN_SHARED_SECRET` ລົງໃນ browser build — server ຈະອອກ
 >   credentials ຊົ່ວຄາວ (10 ນາທີ) ຜ່ານ `/api/ice-servers` ໃຫ້ເອງ.
@@ -117,7 +116,7 @@ https://yonfile.example.com
    curl -s https://yonfile.example.com/health
    # {"status":"ok","activePeers":0}
    curl -s https://yonfile.example.com/api/ice-servers
-   # {"iceServers":[{"urls":"stun:stun.l.google.com:19302"}]}
+   # ຖ້າຕັ້ງ TURN ສຳເລັດ ຄວນເຫັນ iceServers ລາຍການ STUN ແລະ TURN
    ```
 4. ເປີດເວັບ `https://yonfile.example.com` ດ້ວຍ 2 ອຸປະກອນ ໃນເຄືອຂ່າຍດຽວກັນ ເພື່ອທົດສອບການເຫັນກັນ.
 
@@ -141,7 +140,7 @@ https://yonfile.example.com
    | :-- | :-- | :-- |
    | `3478` | TCP + UDP | TURN listening |
    | `49152-65535` | UDP | Relay range |
-5. ຕັ້ງ DNS `turn.yonfile.example.com` → IP Server ແລະ `TURN_URL=turn:turn.yonfile.example.com:3478`.
+5. ຕັ້ງ DNS `turn.yonfile.example.com` → IP Server ແລະໃສ່ URL ທີ່ໃຊ້ໄດ້ໃນ `TURN_URL`. Compose Coturn ຕົວຢ່າງນີ້ຟັງ UDP/TCP ທີ່ 3478; `turns:` ຈະຕ້ອງໃຊ້ TURN provider ຫຼື Coturn ທີ່ຕັ້ງ TLS certificate ແລ້ວ.
 
 ### ທາງ B — ໃຊ້ TURN ພາຍນອກ (Cloudflare Calls / Twilio / Metered)
 - ສ້າງ TURN credentials ຈາກ Provider.
@@ -176,7 +175,7 @@ https://yonfile.example.com
 | ເວັບເປີດບໍ່ໄດ້ / SSL error | DNS ຍັງບໍ່ຊີ້ມາ ຫຼື Let's Encrypt ຍັງບໍ່ອອກ — ກວດ DNS + ກົດ Redeploy |
 | `/health` ບໍ່ຕອບ | Port ບໍ່ກົງ — ກວດ `PORT=3000` ແລະ Ports Exposes `3000` |
 | ເວັບເປີດໄດ້ ແຕ່ບໍ່ເຫັນອຸປະກອນ | ທັງສອງຢູ່ຄົນລະເຄືອຂ່າຍ → ໃຊ້ PIN; ຫຼື WebSocket `wss://` ຖືກ proxy ບລັອກ |
-| ຂ້າມ 4G/5G ບໍ່ໄດ້ | ຍັງບໍ່ມີ TURN ຫຼື secret ບໍ່ຕົງກັນ — ກວດ `TURN_SHARED_SECRET` + ports |
+| ເຫັນ peer ແຕ່ເຊື່ອມຂ້າມ 4G/5G ບໍ່ໄດ້ | ກວດວ່າ `/api/ice-servers` ຄືນ TURN URL, credentials ກົງກັບ Coturn, DNS ຊີ້ IP ຖືກ, ແລະເປີດ TURN listener + UDP relay range ຄົບ; ລອງ TCP/TLS transport ຖ້າ network ບລັອກ UDP |
 | Build ລົ້ມດ້ວຍ OOM | Server RAM ບໍ່ພໍ (Flutter build) — ເພີ່ມ RAM/swap ຫຼື Build Timeout |
 | Build ລົ້ມ: `ERR_PNPM_NO_LOCKFILE` | ບໍ່ມີ `pnpm-lock.yaml` ໃນ repo — commit ໄຟລ໌ນີ້ (Dockerfile ໃຊ້ `--frozen-lockfile`) |
 | APK ຕໍ່ server ບໍ່ໄດ້ | APK ຕ້ອງ build ດ້ວຍ `--dart-define=SIGNALING_URL=wss://yonfile.example.com/ws` |
