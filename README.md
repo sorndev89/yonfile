@@ -60,11 +60,7 @@
 
 ## 2. ການຄົ້ນຫາ ແລະ ຈັບຄູ່ອຸປະກອນ
 
-**ໂໝດ LAN ດຽວກັນ (Zero-Config):** ອຸປະກອນທີ່ເຂົ້າ Signaling ຈະຖືກຈັດກຸ່ມຕາມ
-**Public IP** ທີ່ server ເຫັນ (ຮອງຮັບ `CF-Connecting-IP`, `X-Real-IP`,
-`X-Forwarded-For`). ອຸປະກອນທີ່ຢູ່ວົງດຽວກັນຈະເຫັນກັນໃນໜ້າ Radar ອັດຕະໂນມັດ.
-ເມື່ອໂຍນ → WebRTC ICE ຈະເລືອກ `host candidate` (Local→Local) ເຮັດໃຫ້ຂໍ້ມູນແລ່ນຜ່ານ
-Router ພາຍໃນ ບໍ່ເປືອງອິນເຕີເນັດພາຍນອກ.
+**ການຄົ້ນຫາໃນ LAN:** mDNS ຊ່ວຍຄົ້ນຫາອຸປະກອນພາຍໃນ link ດຽວກັນ; public IP ທີ່ກົງກັນເປັນພຽງຂໍ້ບອກເບື້ອງຕົ້ນ ເພາະຫຼາຍເຄື່ອງອາດອອກອິນເຕີເນັດຜ່ານ NAT ຫຼື proxy ຮ່ວມກັນ. WebRTC ICE ຈະເລືອກ candidate pair ທີ່ໃຊ້ໄດ້; ໜ້າເຊື່ອມຕໍ່ສະແດງວ່າເສັ້ນທາງເປັນ direct ຫຼື TURN relay.
 
 **ໂໝດຂ້າມເຄືອຂ່າຍ (PIN / QR):**
 - ອຸປະກອນສ້າງ **PIN 6 ຕົວເລກ** ອັດຕະໂນມັດ ແລະ ເຂົ້າຫ້ອງຂອງຕົນເອງ (ສະແດງເປັນ `849-201`).
@@ -290,16 +286,17 @@ URL ຜິດ. ການຕັ້ງຄ່າ platform ທີ່ກ່ຽວຂ�
 
 ## 11. STUN / TURN
 
-- **STUN ເລີ່ມຕົ້ນ (ຟຣີ):** `stun:stun.l.google.com:19302` — ພຽງພໍ LAN 100% ແລະ
-  ຂ້າມເນັດທົ່ວໄປ ~80%.
-- **TURN (Production 100%):** ຕັ້ງ `TURN_URL`, `TURN_SHARED_SECRET`, `TURN_REALM` ໃນ `.env`
+- **STUN ເລີ່ມຕົ້ນ (ຟຣີ):** ຊ່ວຍຫາເສັ້ນທາງ direct ຜ່ານ NAT; ຜົນຂຶ້ນກັບ NAT ແລະ firewall ຂອງສອງຝ່າຍ ຈຶ່ງບໍ່ຮັບປະກັນວ່າຈະຕິດຕໍ່ໄດ້ທຸກເຄືອຂ່າຍ.
+- **TURN relay:** ຕັ້ງ `TURN_URL`, `TURN_SHARED_SECRET`, `TURN_REALM` ໃນ `.env`
   ຕາມ [.env.example](.env.example) (secret ດຽວກັນກັບ Coturn) ແລ້ວ:
   ```bash
   docker compose --profile turn up -d
   ```
   Server ຈະອອກ **Coturn REST credentials** ອາຍຸ 10 ນາທີ ຜ່ານ `GET /api/ice-servers`
   (HMAC-SHA1) — **ຢ່າຝັງ shared secret ໃນ browser build**.
-- ເປີດ UDP `3478` ແລະ relay ports `49152–65535` ຜ່ານ firewall.
+- ເປີດ UDP/TCP `3478` ແລະ relay ports `49152–65535` ຜ່ານ firewall. ສຳລັບເຄືອຂ່າຍທີ່ບລັອກ UDP ໃຫ້ຕັ້ງ TLS TURN ກັບ certificate ທີ່ຖືກຕ້ອງ ແລະເປີດພອດ TCP ທີ່ເໝາະສົມ (ເຊັ່ນ 443 ຫຼື 5349).
+- `/health` ລາຍງານ `turnConfigured` ແລະ `turnUrlCount`; ຄ່ານີ້ຢືນຢັນພຽງວ່າ config ມີຢູ່, ຕ້ອງທົດສອບ allocation ຈາກ client ຕ່າງເຄືອຂ່າຍອີກຄັ້ງ.
+- Server ສົ່ງ WebSocket ping ເປັນໄລຍະເພື່ອປິດ socket ທີ່ຂາດການຕອບກັບ; client ຈະ reconnect ຕາມກົນໄກທີ່ມີຢູ່.
 - ຫາກ server ຢູ່ຫຼັງ reverse proxy ໃຫ້ຕັ້ງ `TRUST_PROXY=true` ເມື່ອ proxy ລຶບແລະຂຽນທັບ `X-Forwarded-For`/`CF-Connecting-IP` ຈາກ client ເອງ. ຄ່າເລີ່ມຕົ້ນບໍ່ເຊື່ອ forwarded headers.
 - ຖ້າ web client ຢູ່ຄົນລະ origin ກັບ signaling server ໃຫ້ລະບຸ origin ໃນ `ALLOWED_ORIGINS` (comma-separated). Same-origin ແລະ native clients ບໍ່ຕ້ອງຕັ້ງຄ່ານີ້.
 
@@ -350,11 +347,11 @@ cd apps/web_client && flutter build ios --release --no-codesign
 
 **ຕ້ອງມີ Signaling Server ສະເໝີບໍ?**
 ແມ່ນ. ແອັບບໍ່ມີ server ຢູ່ໃນຕົວ — ອຸປະກອນຕ້ອງເຊື່ອມກັບ server ເພື່ອ**ຈັບຄູ່** ກ່ອນ.
-ຫຼັງຈັບຄູ່ແລ້ວ ໄຟລ໌/ຂໍ້ຄວາມແລ່ນ P2P ໂດຍກົງ (server ບໍ່ຜ່ານໄຟລ໌, ບໍ່ເກັບຂໍ້ມູນ).
+ຫຼັງຈັບຄູ່ WebRTC ICE ຈະເລືອກ direct ຖ້າຕິດຕໍ່ໄດ້; ຖ້າບໍ່ໄດ້ຈະຜ່ານ TURN relay. Signaling server ບໍ່ເກັບໄຟລ໌. ການສົ່ງ WebRTC ຖືກປ້ອງກັນດ້ວຍ DTLS ທັງຕອນ direct ແລະຕອນ relay.
 Android release ຕ້ອງ build ດ້ວຍ `SIGNALING_URL` ຊີ້ໄປຫາ server.
 
 **ຢູ່ LAN ດຽວກັນ ຈະເຫັນກັນບໍ?**
-- Server ຢູ່ອິນເຕີເນັດ (VPS) + ສອງເຄື່ອງ Wi-Fi ດຽວກັນ → ມີ Public IP ດຽວກັນ → **ເຫັນກັນອັດຕະໂນມັດ** ແລະ ໄຟລ໌ແລ່ນຜ່ານ Router ພາຍໃນ (ໄວ).
+- Server ຢູ່ອິນເຕີເນັດ (VPS) + ສອງເຄື່ອງ Wi-Fi ດຽວກັນ → public IP ດຽວກັນເປັນພຽງສັນຍານຄົ້ນຫາ; ICE ອາດເລືອກ direct ຖ້າ router/firewall ອະນຸຍາດ. ການຢູ່ public IP ດຽວກັນບໍ່ໄດ້ຢືນຢັນວ່າຢູ່ LAN ດຽວກັນ.
 - Server ຢູ່ໃນ LAN ເອງ → ແຕ່ລະເຄື່ອງມີ Private IP ຕ່າງກັນ → **ບໍ່ auto-ເຫັນ** ຕ້ອງໃຊ້ PIN.
 - ປັດຈຸບັນ ເວລາສົ່ງ ຈະ**ຖາມ PIN ຂອງຝ່າຍຮັບ** (ຄວາມປອດໄພ) ເຖິງແມ່ນຢູ່ LAN ດຽວກັນ.
 

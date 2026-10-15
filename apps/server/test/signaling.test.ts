@@ -87,6 +87,31 @@ test('registering twice on one socket keeps one stable peer', async () => {
   }
 });
 
+test('reconnecting the same client session replaces its stale websocket', async () => {
+  const previous = await connect();
+  const reconnect = await connect();
+  try {
+    const identity = {
+      installationId: 'test-installation-identity',
+      clientSessionId: 'test-runtime-session',
+    };
+    send(previous, { type: 'register', name: 'Phone', ...identity });
+    const oldPeer = await waitFor(previous, (m) => m.type === 'registered');
+
+    send(reconnect, { type: 'register', name: 'Phone', ...identity });
+    const newPeer = await waitFor(reconnect, (m) => m.type === 'registered');
+    assert.notEqual(newPeer.peerId, oldPeer.peerId);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const health = await fetch(`http://127.0.0.1:${server.port}/health`);
+    const payload = await health.json() as { activePeers: number };
+    assert.equal(payload.activePeers, 1);
+    assert.equal(previous.readyState, WebSocket.CLOSED);
+  } finally {
+    previous.terminate();
+    reconnect.close();
+  }
+});
+
 test('invalid PINs are rejected by the signaling server', async () => {
   const ws = await connect();
   try {
@@ -156,7 +181,10 @@ test('two peers on same IP see each other (LAN scope)', async () => {
     let bId: string | undefined;
     const updatePromise = waitFor(
       a,
-      (m) => m.type === 'peers-updated',
+      (m) =>
+        m.type === 'peers-updated' &&
+        m.scope === 'lan' &&
+        m.peers.some((peer: any) => peer.name === 'B'),
     );
     send(b, {
       type: 'register',

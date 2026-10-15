@@ -36,4 +36,27 @@ void main() {
     expect(peer.operatingSystem, PeerOperatingSystem.unknown);
     expect(peer.operatingSystemLabel, 'OS ບໍ່ລະບຸ');
   });
+
+  test('same-name peers stay visible and get distinguishable labels', () {
+    final peers = PeerDevice.disambiguateNames([
+      const PeerDevice(
+        id: 'abc123-first',
+        name: 'Redmi Note',
+        deviceType: PeerDeviceType.mobile,
+        operatingSystem: PeerOperatingSystem.android,
+        scope: PeerScope.pin,
+      ),
+      const PeerDevice(
+        id: 'def456-second',
+        name: 'redmi note',
+        deviceType: PeerDeviceType.mobile,
+        operatingSystem: PeerOperatingSystem.android,
+        scope: PeerScope.pin,
+      ),
+    ]);
+
+    expect(peers, hasLength(2));
+    expect(peers[0].name, 'Redmi Note · Android #abc123');
+    expect(peers[1].name, 'redmi note · Android #def456');
+  });
 }

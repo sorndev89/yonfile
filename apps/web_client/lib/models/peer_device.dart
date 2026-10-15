@@ -22,6 +22,37 @@ class PeerDevice {
     required this.scope,
   });
 
+  PeerDevice copyWith({String? name}) => PeerDevice(
+    id: id,
+    name: name ?? this.name,
+    deviceType: deviceType,
+    operatingSystem: operatingSystem,
+    scope: scope,
+  );
+
+  /// Keep legitimate peers with identical model/device names distinguishable.
+  static List<PeerDevice> disambiguateNames(Iterable<PeerDevice> peers) {
+    final devices = peers.toList(growable: false);
+    final nameCounts = <String, int>{};
+    for (final peer in devices) {
+      final key = peer.name.trim().toLowerCase();
+      nameCounts[key] = (nameCounts[key] ?? 0) + 1;
+    }
+    return devices
+        .map((peer) {
+          if ((nameCounts[peer.name.trim().toLowerCase()] ?? 0) < 2) {
+            return peer;
+          }
+          final shortId = peer.id.length > 6
+              ? peer.id.substring(0, 6)
+              : peer.id;
+          return peer.copyWith(
+            name: '${peer.name} · ${peer.operatingSystemLabel} #$shortId',
+          );
+        })
+        .toList(growable: false);
+  }
+
   factory PeerDevice.fromJson(Map<String, dynamic> json) {
     return PeerDevice(
       id: json['id'] as String,

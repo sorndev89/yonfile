@@ -17,6 +17,7 @@ class ConnectionScreen extends StatelessWidget {
     required this.pendingOffers,
     required this.transfers,
     required this.hasActiveTransfer,
+    required this.connectionRoute,
     required this.onSendFile,
     required this.onDisconnect,
     required this.onAccept,
@@ -30,6 +31,7 @@ class ConnectionScreen extends StatelessWidget {
   final List<IncomingFileOffer> pendingOffers;
   final List<FileTransferState> transfers;
   final bool hasActiveTransfer;
+  final String connectionRoute;
   final VoidCallback onSendFile;
   final VoidCallback onDisconnect;
   final ValueChanged<String> onAccept;
@@ -90,6 +92,19 @@ class ConnectionScreen extends StatelessWidget {
                       ? YonTheme.yonOrange
                       : YonTheme.emeraldGreen,
                   fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Center(
+              child: Text(
+                switch (connectionRoute) {
+                  'relay' => 'ເສັ້ນທາງ: ຜ່ານ TURN relay',
+                  'direct' => 'ເສັ້ນທາງ: ເຊື່ອມຕໍ່ໂດຍກົງ',
+                  _ => 'ກຳລັງກວດສອບເສັ້ນທາງສົ່ງ',
+                },
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: isDark ? Colors.white60 : Colors.black54,
                 ),
               ),
             ),

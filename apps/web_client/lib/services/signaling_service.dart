@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as ws_status;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/constants/app_config.dart';
 import '../models/peer_device.dart';
@@ -30,7 +32,32 @@ class SignalEvent {
 
 /// SignalingService — WebSocket client ລົມກັບ Node.js Signaling Server.
 class SignalingService {
-  SignalingService({String? url}) : _url = url ?? AppConfig.signalingUrl;
+  SignalingService({String? url})
+    : _url = url ?? AppConfig.signalingUrl,
+      _clientSessionId = _randomId(),
+      _identityReady = _loadInstallationId();
+
+  static const _installationIdKey = 'yonfile_installation_id_v1';
+
+  static String _randomId() {
+    final random = Random.secure();
+    return List<int>.generate(16, (_) => random.nextInt(256))
+        .map((value) => value.toRadixString(16).padLeft(2, '0'))
+        .join();
+  }
+
+  static Future<String> _loadInstallationId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final current = prefs.getString(_installationIdKey);
+    if (current != null && current.isNotEmpty) return current;
+    final created = _randomId();
+    await prefs.setString(_installationIdKey, created);
+    return created;
+  }
+
+  final String _clientSessionId;
+  final Future<String> _identityReady;
+  String? _installationId;
 
   String _url;
   String get url => _url;
@@ -73,6 +100,16 @@ class SignalingService {
     _manuallyClosed = false;
     _statusController.add(SignalingStatus.connecting);
 
+    try {
+      _installationId ??= await _identityReady;
+    } catch (error) {
+      debugPrint('Unable to load installation identity: $error');
+    }
+    if (_manuallyClosed || generation != _endpointGeneration) {
+      _connecting = false;
+      return;
+    }
+
     WebSocketChannel? channel;
     try {
       channel = WebSocketChannel.connect(Uri.parse(_url));
@@ -103,6 +140,8 @@ class SignalingService {
         'name': _name,
         'deviceType': _deviceType.name,
         'operatingSystem': _operatingSystem.name,
+        'installationId': _installationId,
+        'clientSessionId': _clientSessionId,
       });
     } catch (error) {
       debugPrint('Signaling connect failed: $error');
@@ -216,6 +255,8 @@ class SignalingService {
         'name': _name,
         'deviceType': _deviceType.name,
         'operatingSystem': _operatingSystem.name,
+        'installationId': _installationId,
+        'clientSessionId': _clientSessionId,
       });
       _pendingNameUpdate = false;
     } else {

@@ -29,12 +29,16 @@ export class RoomManager {
     name?: string,
     deviceType?: DeviceType,
     operatingSystem?: OperatingSystem,
+    installationId?: string,
+    clientSessionId?: string,
   ): Peer {
     const existing = [...this.peers.values()].find((peer) => peer.ws === ws);
     if (existing) {
       existing.name = name?.trim().slice(0, 60) || existing.name;
       if (deviceType) existing.deviceType = deviceType;
       if (operatingSystem) existing.operatingSystem = operatingSystem;
+      existing.installationId = installationId ?? existing.installationId;
+      existing.clientSessionId = clientSessionId ?? existing.clientSessionId;
       return existing;
     }
     const id = crypto.randomUUID();
@@ -43,12 +47,31 @@ export class RoomManager {
       name: name?.trim().slice(0, 60) || 'ອຸປະກອນ YonFile',
       deviceType: deviceType ?? 'desktop',
       operatingSystem: operatingSystem ?? 'unknown',
+      installationId: installationId ?? null,
+      clientSessionId: clientSessionId ?? null,
       ip,
       pinRoom: null,
       ws,
     };
     this.peers.set(id, peer);
     return peer;
+  }
+
+  /** Remove a stale socket from the same app installation and runtime session. */
+  removeClientSession(
+    installationId: string,
+    clientSessionId: string,
+    exceptId?: string,
+  ): Peer | undefined {
+    const previous = [...this.peers.values()].find(
+      (peer) =>
+        peer.id !== exceptId &&
+        peer.installationId === installationId &&
+        peer.clientSessionId === clientSessionId,
+    );
+    if (!previous) return undefined;
+    this.peers.delete(previous.id);
+    return previous;
   }
 
   remove(id: string): Peer | undefined {

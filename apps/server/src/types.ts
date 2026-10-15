@@ -18,6 +18,10 @@ export interface Peer {
   name: string;
   deviceType: DeviceType;
   operatingSystem: OperatingSystem;
+  /** Stable per-install identity; never sent to other peers. */
+  installationId: string | null;
+  /** Stable for one running client session; distinguishes browser tabs. */
+  clientSessionId: string | null;
   /** Public IP ທີ່ດຶງຈາກ Reverse Proxy ໃຊ້ຈັດກຸ່ມ LAN */
   ip: string;
   /** ລະຫັດຫ້ອງ 6 ຕົວເລກ ສຳລັບໂຍນຂ້າມເຄືອຂ່າຍ */
@@ -41,6 +45,8 @@ export interface RegisterMessage {
   name?: string;
   deviceType?: DeviceType;
   operatingSystem?: OperatingSystem;
+  installationId?: string;
+  clientSessionId?: string;
 }
 
 export interface UpdateNameMessage {

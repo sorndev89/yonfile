@@ -26,6 +26,14 @@ class PeerChannelState {
   bool get isOpen => state == RTCDataChannelState.RTCDataChannelOpen;
 }
 
+class PeerRouteState {
+  const PeerRouteState(this.peerId, this.route);
+
+  final String peerId;
+  /// `direct`, `relay`, or `unknown` until ICE exposes a selected pair.
+  final String route;
+}
+
 class _PeerSession {
   _PeerSession({required this.peerId, required this.pc});
 
@@ -56,10 +64,12 @@ class WebRtcService {
 
   final _messageController = StreamController<PeerMessage>.broadcast();
   final _stateController = StreamController<PeerChannelState>.broadcast();
+  final _routeController = StreamController<PeerRouteState>.broadcast();
   final _disconnectController = StreamController<String>.broadcast();
 
   Stream<PeerMessage> get messages => _messageController.stream;
   Stream<PeerChannelState> get channelStates => _stateController.stream;
+  Stream<PeerRouteState> get routeStates => _routeController.stream;
   Stream<String> get disconnects => _disconnectController.stream;
 
   bool isOpen(String peerId) =>
@@ -179,6 +189,9 @@ class WebRtcService {
           session,
           'ICE negotiation failed. A TURN relay may be required for these networks.',
         );
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        unawaited(_publishSelectedRoute(session));
       }
     };
 
@@ -236,6 +249,7 @@ class WebRtcService {
       if (state == RTCDataChannelState.RTCDataChannelOpen &&
           !session.openCompleter.isCompleted) {
         session.openCompleter.complete(channel);
+        unawaited(_publishSelectedRoute(session));
       }
     };
 
@@ -251,6 +265,7 @@ class WebRtcService {
       if (!session.openCompleter.isCompleted) {
         session.openCompleter.complete(channel);
       }
+      unawaited(_publishSelectedRoute(session));
       if (!_stateController.isClosed) {
         _stateController.add(
           PeerChannelState(
@@ -259,6 +274,64 @@ class WebRtcService {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _publishSelectedRoute(_PeerSession session) async {
+    for (var attempt = 0; attempt < 4; attempt++) {
+      if (!identical(_sessions[session.peerId], session)) return;
+      try {
+        final reports = await session.pc.getStats();
+        final pairs = reports.where((report) => report.type == 'candidate-pair');
+        final transports = reports.where((report) => report.type == 'transport');
+        final selectedIds = transports
+            .map((report) => report.values['selectedCandidatePairId'])
+            .whereType<String>()
+            .toSet();
+        StatsReport? selectedPair;
+        for (final pair in pairs) {
+          final values = pair.values;
+          if (selectedIds.contains(pair.id) ||
+              values['selected'] == true ||
+              (values['nominated'] == true && values['state'] == 'succeeded')) {
+            selectedPair = pair;
+            break;
+          }
+        }
+        if (selectedPair != null) {
+          final localId = selectedPair.values['localCandidateId'];
+          final remoteId = selectedPair.values['remoteCandidateId'];
+          final candidateTypes = reports
+              .where((report) =>
+                  (report.type == 'local-candidate' ||
+                      report.type == 'remote-candidate') &&
+                  (report.id == localId || report.id == remoteId))
+              .map((report) => report.values['candidateType'])
+              .whereType<String>()
+              .toSet();
+          final route = candidateTypes.contains('relay')
+              ? 'relay'
+              : candidateTypes.any(
+                  (type) =>
+                      type == 'host' || type == 'srflx' || type == 'prflx',
+                )
+              ? 'direct'
+              : null;
+          if (route != null) {
+            if (!_routeController.isClosed) {
+              _routeController.add(PeerRouteState(session.peerId, route));
+            }
+            return;
+          }
+        }
+      } catch (error) {
+        debugPrint('Unable to read selected ICE route (${session.peerId}): $error');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    if (identical(_sessions[session.peerId], session) &&
+        !_routeController.isClosed) {
+      _routeController.add(PeerRouteState(session.peerId, 'unknown'));
     }
   }
 
@@ -386,6 +459,9 @@ class WebRtcService {
 
   void _teardown(String peerId) {
     _sessions.remove(peerId);
+    if (!_routeController.isClosed) {
+      _routeController.add(PeerRouteState(peerId, 'unknown'));
+    }
     if (!_stateController.isClosed) {
       _stateController.add(
         PeerChannelState(peerId, RTCDataChannelState.RTCDataChannelClosed),
@@ -401,6 +477,7 @@ class WebRtcService {
     _sessions.clear();
     _messageController.close();
     _stateController.close();
+    _routeController.close();
     _disconnectController.close();
   }
 }

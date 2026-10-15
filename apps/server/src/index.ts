@@ -37,6 +37,7 @@ const PIN_ATTEMPT_WINDOW_MS = 60_000;
 const MAX_PIN_ATTEMPTS_PER_WINDOW = 20;
 const iceAttempts = new Map<string, number[]>();
 const MAX_ICE_REQUESTS_PER_WINDOW = 30;
+const HEARTBEAT_INTERVAL_MS = 20_000;
 
 /**
  * ດຶງ Public IP ແທ້ຈາກ Reverse Proxy (Coolify / Traefik / Cloudflare / Nginx).
@@ -61,6 +62,11 @@ function extractClientIp(req: http.IncomingMessage): string {
 wss.on('connection', (ws, req) => {
   const clientIp = extractClientIp(req);
   let peerId: string | null = null;
+  const heartbeatState = ws as WebSocket & { __yonfileAlive?: boolean };
+  heartbeatState.__yonfileAlive = true;
+  ws.on('pong', () => {
+    heartbeatState.__yonfileAlive = true;
+  });
 
   ws.on('message', (rawMessage) => {
     if (Buffer.byteLength(rawMessage.toString()) > MAX_SIGNAL_BYTES) {
@@ -103,7 +109,27 @@ wss.on('connection', (ws, req) => {
           name,
           deviceType,
           operatingSystem,
+          typeof msg.installationId === 'string' && msg.installationId.length <= 128
+            ? msg.installationId
+            : undefined,
+          typeof msg.clientSessionId === 'string' && msg.clientSessionId.length <= 128
+            ? msg.clientSessionId
+            : undefined,
         );
+        if (peer.installationId && peer.clientSessionId) {
+          const replaced = rooms.removeClientSession(
+            peer.installationId,
+            peer.clientSessionId,
+            peer.id,
+          );
+          if (replaced) {
+            try {
+              replaced.ws.terminate();
+            } catch (_) {}
+            rooms.broadcastLan(replaced.ip);
+            if (replaced.pinRoom) rooms.broadcastPin(replaced.pinRoom);
+          }
+        }
         peerId = peer.id;
         ws.send(
           JSON.stringify({ type: 'registered', peerId: peer.id, ip: clientIp }),
@@ -210,7 +236,20 @@ function relaySignal(senderId: string, msg: SignalMessage): void {
 
 // Healthcheck Endpoint ສຳລັບ Coolify
 app.get('/health', (_req, res) => {
-  res.status(200).json({ status: 'ok', activePeers: rooms.size });
+  const turnUrlCount = (process.env.TURN_URL ?? '')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean).length;
+  const turnConfigured =
+    turnUrlCount > 0 &&
+    Boolean(process.env.TURN_SHARED_SECRET) &&
+    process.env.TURN_SHARED_SECRET !== 'CHANGE_ME_TURN_SECRET';
+  res.status(200).json({
+    status: 'ok',
+    activePeers: rooms.size,
+    turnConfigured,
+    turnUrlCount: turnConfigured ? turnUrlCount : 0,
+  });
 });
 
 app.get('/api/ice-servers', (req, res) => {
@@ -281,13 +320,27 @@ export function startServer(
       const actualPort =
         typeof address === 'object' && address ? address.port : port;
       console.log(`🟠 YonFile Server is running on http://0.0.0.0:${actualPort}`);
+      const heartbeat = setInterval(() => {
+        for (const socket of wss.clients) {
+          const state = socket as WebSocket & { __yonfileAlive?: boolean };
+          if (state.__yonfileAlive === false) {
+            socket.terminate();
+            continue;
+          }
+          state.__yonfileAlive = false;
+          if (socket.readyState === WebSocket.OPEN) socket.ping();
+        }
+      }, HEARTBEAT_INTERVAL_MS);
+      heartbeat.unref();
       resolve({
         port: actualPort,
-        close: () =>
-          new Promise<void>((done) => {
+        close: () => {
+          clearInterval(heartbeat);
+          return new Promise<void>((done) => {
             wss.close();
             server.close(() => done());
-          }),
+          });
+        },
       });
     });
   });

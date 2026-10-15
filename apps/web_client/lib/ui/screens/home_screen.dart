@@ -72,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _joinedPin;
 
   final Set<String> _connectedPeerIds = {};
+  final Map<String, String> _connectionRoutes = {};
   final Set<String> _knownCompletedTransfers = {};
   String? _activePeerId;
   bool _transferSheetOpen = false;
@@ -229,10 +230,18 @@ class _HomeScreenState extends State<HomeScreen> {
             _activePeerId ??= event.peerId;
           } else {
             _connectedPeerIds.remove(event.peerId);
+            _connectionRoutes.remove(event.peerId);
             if (_activePeerId == event.peerId) _activePeerId = null;
             _fileTransfers.onPeerDisconnected(event.peerId);
           }
         });
+      }),
+    );
+
+    _subs.add(
+      _webrtc.routeStates.listen((event) {
+        if (!mounted) return;
+        setState(() => _connectionRoutes[event.peerId] = event.route);
       }),
     );
 
@@ -293,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final p in _mdnsPeers.values) {
       merged[p.id] = p;
     }
-    return merged.values.toList();
+    return PeerDevice.disambiguateNames(merged.values);
   }
 
   Future<void> _publishLocalPresence(String peerId) => _lanDiscovery.publish(
@@ -1159,6 +1168,7 @@ class _HomeScreenState extends State<HomeScreen> {
           .toList(),
       transfers: transfers,
       hasActiveTransfer: _fileTransfers.hasActiveTransferForPeer(peer.id),
+      connectionRoute: _connectionRoutes[peer.id] ?? 'unknown',
       onSendFile: () => _pickAndSend(peer),
       onDisconnect: _disconnectActivePeer,
       onAccept: _fileTransfers.acceptIncomingOffer,
