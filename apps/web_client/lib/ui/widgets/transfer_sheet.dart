@@ -72,14 +72,16 @@ class TransferSheet extends StatelessWidget {
             if (showHeader)
               Row(
                 children: [
-                  const Icon(Icons.swap_vert_rounded,
-                      color: YonTheme.yonOrange),
+                  const Icon(
+                    Icons.swap_vert_rounded,
+                    color: YonTheme.yonOrange,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     'ການໂຍນໄຟລ໌',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const Spacer(),
                   if (onClearCompleted != null)
@@ -177,8 +179,11 @@ class _TransferTile extends StatelessWidget {
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   onPressed: onCancel,
-                  icon: const Icon(Icons.close_rounded,
-                      color: YonTheme.roseRed, size: 20),
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    color: YonTheme.roseRed,
+                    size: 20,
+                  ),
                 ),
             ],
           ),
@@ -190,53 +195,93 @@ class _TransferTile extends StatelessWidget {
                   ? 1
                   : transfer.progress,
               minHeight: 8,
-              backgroundColor:
-                  isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.06),
+              backgroundColor: isDark
+                  ? Colors.white12
+                  : Colors.black.withValues(alpha: 0.06),
               valueColor: AlwaysStoppedAnimation<Color>(status.color),
             ),
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Text(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final statusText = Text(
                 status.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: status.color,
                 ),
-              ),
-              const Spacer(),
-              Text(
+              );
+              final percentText = Text(
                 '${transfer.percent}%',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                   fontFeatures: [FontFeature.tabularFigures()],
                 ),
-              ),
-              const SizedBox(width: 10),
-              Text(
+              );
+              final sizeText = Text(
                 '${transfer.readableTransferred} / ${transfer.readableSize}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 11,
                   color: isDark ? Colors.white54 : Colors.black45,
                   fontFeatures: const [FontFeature.tabularFigures()],
                 ),
-              ),
-              if (transfer.status == TransferStatus.transferring) ...[
-                const SizedBox(width: 10),
-                Text(
-                  '⚡ ${transfer.readableSpeed}',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: YonTheme.yonOrange,
-                    fontWeight: FontWeight.w600,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
+              );
+              final speedText = Text(
+                '⚡ ${transfer.readableSpeed}',
+                maxLines: 1,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: YonTheme.yonOrange,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: [FontFeature.tabularFigures()],
                 ),
-              ],
-            ],
+              );
+
+              if (constraints.maxWidth < 440) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(child: statusText),
+                        const SizedBox(width: 12),
+                        percentText,
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Expanded(child: sizeText),
+                        if (transfer.status == TransferStatus.transferring) ...[
+                          const SizedBox(width: 8),
+                          speedText,
+                        ],
+                      ],
+                    ),
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  statusText,
+                  const Spacer(),
+                  percentText,
+                  const SizedBox(width: 10),
+                  sizeText,
+                  if (transfer.status == TransferStatus.transferring) ...[
+                    const SizedBox(width: 10),
+                    speedText,
+                  ],
+                ],
+              );
+            },
           ),
           if (transfer.error != null)
             Padding(
