@@ -134,6 +134,7 @@ class FileTransferController extends ChangeNotifier {
           );
         },
         isCancelled: () => _cancelled.contains(id),
+        isChannelOpen: () => _webrtc.isOpen(peer.id),
       );
       await _webrtc.sendText(
         peer.id,
@@ -155,9 +156,20 @@ class FileTransferController extends ChangeNotifier {
         );
       }
     } catch (error) {
+      if (_webrtc.isOpen(peer.id)) {
+        _webrtc.sendText(
+          peer.id,
+          jsonEncode({'type': 'cancel-file', 'id': id}),
+        );
+      }
       _updateTransfer(
         id,
-        (t) => t.copyWith(status: TransferStatus.failed, error: '$error'),
+        (t) => t.copyWith(
+          status: TransferStatus.failed,
+          error: error is TransferStalledException
+              ? 'ການສົ່ງຢຸດຊະງັກ ກະລຸນາລອງສົ່ງໃໝ່'
+              : '$error',
+        ),
       );
     } finally {
       _outgoingBytes.remove(id);
@@ -217,6 +229,36 @@ class FileTransferController extends ChangeNotifier {
       if (entry.value == peerId) {
         final pending = _pendingAccepts[entry.key];
         if (pending != null && !pending.isCompleted) pending.complete(false);
+        if (_outgoingBytes.containsKey(entry.key)) {
+          _cancelled.add(entry.key);
+        }
+        final incoming = _incoming.remove(entry.key);
+        incoming?.dispose();
+        if (_activeIncomingId[peerId] == entry.key) {
+          _activeIncomingId.remove(peerId);
+        }
+        if (incoming != null) {
+          _updateTransfer(
+            entry.key,
+            (transfer) => transfer.copyWith(
+              status: TransferStatus.failed,
+              error: 'ການເຊື່ອມຕໍ່ຖືກຕັດຂະນະຮັບໄຟລ໌',
+            ),
+          );
+          _transferPeers.remove(entry.key);
+        } else if (!_outgoingBytes.containsKey(entry.key) &&
+            _transfers.any(
+              (transfer) => transfer.id == entry.key && transfer.isActive,
+            )) {
+          _updateTransfer(
+            entry.key,
+            (transfer) => transfer.copyWith(
+              status: TransferStatus.failed,
+              error: 'ການເຊື່ອມຕໍ່ຖືກຕັດກ່ອນຢືນຢັນການສົ່ງ',
+            ),
+          );
+          _transferPeers.remove(entry.key);
+        }
       }
     }
   }
@@ -297,7 +339,12 @@ class FileTransferController extends ChangeNotifier {
       return;
     }
 
-    _incoming[id] = IncomingFile(id: id, fileName: name, fileSize: size);
+    _incoming[id] = IncomingFile(
+      id: id,
+      fileName: name,
+      fileSize: size,
+      onStalled: () => _onIncomingStalled(peerId, id),
+    );
     _activeIncomingId[peerId] = id;
     _transferPeers[id] = peerId;
     _upsertTransfer(
@@ -335,6 +382,7 @@ class FileTransferController extends ChangeNotifier {
     final incoming = id == null ? null : _incoming[id];
     if (id == null || incoming == null) return;
     if (bytes.isEmpty || incoming.received + bytes.length > incoming.fileSize) {
+      incoming.dispose();
       _incoming.remove(id);
       _activeIncomingId.remove(peerId);
       _transferPeers.remove(id);
@@ -362,6 +410,7 @@ class FileTransferController extends ChangeNotifier {
     final id = data['id'] is String ? data['id'] as String : '';
     final incoming = _incoming[id];
     if (id.isEmpty || incoming == null) return;
+    incoming.dispose();
     _updateTransfer(id, (t) => t.copyWith(status: TransferStatus.verifying));
     final expected = data['sha256'] is String ? data['sha256'] as String : null;
     final bytes = incoming.takeBytes();
@@ -415,6 +464,24 @@ class FileTransferController extends ChangeNotifier {
     _transferPeers.remove(id);
   }
 
+  void _onIncomingStalled(String peerId, String id) {
+    final incoming = _incoming.remove(id);
+    if (incoming == null) return;
+    incoming.dispose();
+    if (_activeIncomingId[peerId] == id) _activeIncomingId.remove(peerId);
+    _transferPeers.remove(id);
+    _updateTransfer(
+      id,
+      (transfer) => transfer.copyWith(
+        status: TransferStatus.failed,
+        error: 'ບໍ່ໄດ້ຮັບຂໍ້ມູນເພີ່ມເກີນ 45 ວິນາທີ ກະລຸນາລອງໃໝ່',
+      ),
+    );
+    if (_webrtc.isOpen(peerId)) {
+      _webrtc.sendText(peerId, jsonEncode({'type': 'cancel-file', 'id': id}));
+    }
+  }
+
   void _onTransferComplete(Map<String, dynamic> data) {
     final id = data['id'] is String ? data['id'] as String : '';
     if (id.isEmpty) return;
@@ -441,7 +508,7 @@ class FileTransferController extends ChangeNotifier {
     final pending = _pendingAccepts[id];
     if (pending != null && !pending.isCompleted) pending.complete(false);
     final peerId = _transferPeers.remove(id);
-    _incoming.remove(id);
+    _incoming.remove(id)?.dispose();
     if (peerId != null && _activeIncomingId[peerId] == id) {
       _activeIncomingId.remove(peerId);
     }
@@ -478,8 +545,14 @@ class FileTransferController extends ChangeNotifier {
       if (_webrtc.isOpen(peerId)) {
         _webrtc.sendText(peerId, jsonEncode({'type': 'cancel-file', 'id': id}));
       }
-      final isIncoming = _incoming.remove(id) != null;
-      if (isIncoming) _cancelled.remove(id);
+      final incoming = _incoming.remove(id);
+      final isIncoming = incoming != null;
+      if (isIncoming) {
+        // The receiver no longer owns the in-memory assembly or peer lock.
+        incoming.dispose();
+        _cancelled.remove(id);
+        _transferPeers.remove(id);
+      }
       if (_activeIncomingId[peerId] == id) _activeIncomingId.remove(peerId);
     }
   }
@@ -521,6 +594,10 @@ class FileTransferController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    for (final incoming in _incoming.values) {
+      incoming.dispose();
+    }
+    _incoming.clear();
     _messageSubscription.cancel();
     revision.dispose();
     super.dispose();

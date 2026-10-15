@@ -9,14 +9,17 @@ class AppConfig {
   static const String appName = 'ໂຍນໄຟລ໌';
   static const String appNameEn = 'YonFile';
 
-  /// ຂະໜາດ Chunk 64 KB.
-  static const int chunkSize = 64 * 1024;
+  /// ຂະໜາດ Chunk 16 KB ເພື່ອໃຫ້ຮອງຮັບ SCTP message limit ໃນ browser/mobile.
+  static const int chunkSize = 16 * 1024;
 
   /// ຂີດຈຳກັດ Buffer ສູງສຸດ 1 MB (Backpressure control).
   static const int maxBufferedAmount = 1024 * 1024;
 
   /// ເວລາລໍຖ້າລະຫວ່າງກວດ Buffer (ms).
   static const int backpressurePollMs = 20;
+
+  /// ຍົກເລີກ transfer ເມື່ອ buffer ບໍ່ຫຼຸດ ຫຼືຜູ້ຮັບບໍ່ໄດ້ຮັບຂໍ້ມູນ.
+  static const int transferStallTimeoutSeconds = 45;
   static const int maxFileSizeBytes = 512 * 1024 * 1024;
 
   static const String _envSignalingUrl = String.fromEnvironment(

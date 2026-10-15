@@ -8,8 +8,8 @@ void main() {
   final chunker = FileChunkerService();
 
   group('FileChunkerService', () {
-    test('chunk size is 64KB', () {
-      expect(AppConfig.chunkSize, 64 * 1024);
+    test('chunk size is 16KB for broad RTC data channel compatibility', () {
+      expect(AppConfig.chunkSize, 16 * 1024);
     });
 
     test('sha256Of returns 64-char hex digest', () {
@@ -32,6 +32,20 @@ void main() {
         rebuilt.add(piece);
       }
       expect(rebuilt.toBytes(), equals(data));
+    });
+
+    test('stops immediately when the data channel is closed', () async {
+      await expectLater(
+        chunker.sendFile(
+          bytes: Uint8List.fromList([1]),
+          sendChunk: (_) async {},
+          bufferedAmount: () => 0,
+          onProgress: (_) {},
+          isCancelled: () => false,
+          isChannelOpen: () => false,
+        ),
+        throwsA(isA<TransferStalledException>()),
+      );
     });
   });
 

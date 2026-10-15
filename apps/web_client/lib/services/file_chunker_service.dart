@@ -9,7 +9,14 @@ class TransferCancelledException implements Exception {
   const TransferCancelledException();
 }
 
-/// ຈັດການຕັດໄຟລ໌ເປັນຕ່ອນ 64 KB, ຄວບຄຸມ Backpressure ແລະ ກວດ SHA-256.
+class TransferStalledException implements Exception {
+  const TransferStalledException();
+
+  @override
+  String toString() => 'Transfer stalled: data channel made no progress';
+}
+
+/// ຈັດການຕັດໄຟລ໌ເປັນຕ່ອນ 16 KB, ຄວບຄຸມ Backpressure ແລະ ກວດ SHA-256.
 class FileChunkerService {
   static const int chunkSize = AppConfig.chunkSize;
 
@@ -31,18 +38,27 @@ class FileChunkerService {
     required int Function() bufferedAmount,
     required void Function(int sent) onProgress,
     required bool Function() isCancelled,
+    required bool Function() isChannelOpen,
   }) async {
     var offset = 0;
+    var lastDrain = DateTime.now();
     while (offset < bytes.length) {
       if (isCancelled()) throw const TransferCancelledException();
+      if (!isChannelOpen()) throw const TransferStalledException();
 
       // ລໍຖ້າໃຫ້ Buffer ຫຼຸດລົງກ່ອນ (ປ້ອງກັນ browser/ອຸປະກອນຄ້າງ).
       while (bufferedAmount() > AppConfig.maxBufferedAmount) {
+        if (!isChannelOpen()) throw const TransferStalledException();
+        if (DateTime.now().difference(lastDrain) >=
+            const Duration(seconds: AppConfig.transferStallTimeoutSeconds)) {
+          throw const TransferStalledException();
+        }
         await Future<void>.delayed(
           const Duration(milliseconds: AppConfig.backpressurePollMs),
         );
         if (isCancelled()) throw const TransferCancelledException();
       }
+      lastDrain = DateTime.now();
 
       final end = (offset + chunkSize).clamp(0, bytes.length);
       await sendChunk(Uint8List.sublistView(bytes, offset, end));
@@ -59,7 +75,15 @@ class IncomingFile {
     required this.fileName,
     required this.fileSize,
     this.expectedSha256,
-  }) : _stopwatch = Stopwatch()..start();
+    Duration stallTimeout = const Duration(
+      seconds: AppConfig.transferStallTimeoutSeconds,
+    ),
+    void Function()? onStalled,
+  }) : _stopwatch = Stopwatch()..start(),
+       _stallTimeout = stallTimeout,
+       _onStalled = onStalled {
+    _resetStallTimer();
+  }
 
   final String id;
   final String fileName;
@@ -68,6 +92,9 @@ class IncomingFile {
 
   final BytesBuilder _builder = BytesBuilder(copy: false);
   final Stopwatch _stopwatch;
+  final Duration _stallTimeout;
+  final void Function()? _onStalled;
+  Timer? _stallTimer;
   int received = 0;
   double bytesPerSecond = 0;
   Uint8List? _finalBytes;
@@ -76,12 +103,25 @@ class IncomingFile {
       fileSize <= 0 ? 0 : (received / fileSize).clamp(0.0, 1.0);
 
   void addChunk(Uint8List chunk) {
+    _resetStallTimer();
     _builder.add(chunk);
     received += chunk.length;
     final seconds = _stopwatch.elapsedMilliseconds / 1000.0;
     if (seconds > 0.15) {
       bytesPerSecond = received / seconds;
     }
+  }
+
+  void _resetStallTimer() {
+    _stallTimer?.cancel();
+    if (_onStalled != null) {
+      _stallTimer = Timer(_stallTimeout, _onStalled);
+    }
+  }
+
+  void dispose() {
+    _stallTimer?.cancel();
+    _stallTimer = null;
   }
 
   /// ດຶງ bytes ອອກຄັ້ງດຽວ (idempotent).

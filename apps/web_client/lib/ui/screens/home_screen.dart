@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../controllers/file_transfer_controller.dart';
 import '../../core/constants/app_config.dart';
 import '../../core/theme/yon_theme.dart';
+import '../../models/file_transfer_state.dart';
 import '../../models/peer_device.dart';
 import '../../models/picked_file.dart';
 import '../../services/local_signaling_host.dart';
@@ -62,7 +63,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _joinedPin;
 
   final Set<String> _connectedPeerIds = {};
+  final Set<String> _knownCompletedTransfers = {};
   String? _activePeerId;
+  bool _transferSheetOpen = false;
 
   @override
   void initState() {
@@ -204,6 +207,25 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onTransferStateChanged() {
+    final completedIds = _fileTransfers.transfers
+        .where((transfer) => transfer.status == TransferStatus.completed)
+        .map((transfer) => transfer.id)
+        .toSet();
+    final completedNewTransfer = completedIds.any(
+      (id) => !_knownCompletedTransfers.contains(id),
+    );
+    _knownCompletedTransfers.addAll(completedIds);
+    final hasActiveTransfers = _fileTransfers.transfers.any(
+      (transfer) => transfer.isActive,
+    );
+
+    if (mounted &&
+        _transferSheetOpen &&
+        completedNewTransfer &&
+        !hasActiveTransfers) {
+      _transferSheetOpen = false;
+      Navigator.of(context).pop();
+    }
     if (mounted) setState(() {});
   }
 
@@ -497,6 +519,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openTransferSheet() {
     if (!mounted) return;
+    _knownCompletedTransfers.addAll(
+      _fileTransfers.transfers
+          .where((transfer) => transfer.status == TransferStatus.completed)
+          .map((transfer) => transfer.id),
+    );
+    _transferSheetOpen = true;
     TransferSheet.show(
       context,
       transfers: _fileTransfers.transfers,
@@ -506,7 +534,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _fileTransfers.clearCompleted();
         Navigator.pop(context);
       },
-    );
+    ).whenComplete(() => _transferSheetOpen = false);
   }
 
   Future<void> _disconnectActivePeer() async {
