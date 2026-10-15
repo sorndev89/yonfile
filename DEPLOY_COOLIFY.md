@@ -14,6 +14,7 @@
 - Coolify ຕິດຕັ້ງແລ້ວ (self-host) ແລະ ເຂົ້າໄດ້ Dashboard.
 - VPS / Server ທີ່ມີ **Docker** (Coolify ຈັດການໃຫ້).
 - Git Repository ຂອງໂປຣເຈັກ (GitHub / GitLab / Gitea) ທີ່ Coolify ເຂົ້າໄດ້.
+- **`pnpm-lock.yaml`** ຕ້ອງ commit ເຂົ້າ repo (Dockerfile ໃຊ້ `pnpm install --frozen-lockfile`).
 - **ໂດເມນ** ຊີ້ A-record ມາຫາ IP ຂອງ Server (ເຊັ່ນ `yonfile.example.com`).
 - (ຖ້າໃຊ້ TURN ຂອງຕົນເອງ) IP ສາທາລະນະ ແລະ ເປີດ Firewall ports ຕາມຂໍ້ 8.
 
@@ -174,6 +175,7 @@ https://yonfile.example.com
 | ເວັບເປີດໄດ້ ແຕ່ບໍ່ເຫັນອຸປະກອນ | ທັງສອງຢູ່ຄົນລະເຄືອຂ່າຍ → ໃຊ້ PIN; ຫຼື WebSocket `wss://` ຖືກ proxy ບລັອກ |
 | ຂ້າມ 4G/5G ບໍ່ໄດ້ | ຍັງບໍ່ມີ TURN ຫຼື secret ບໍ່ຕົງກັນ — ກວດ `TURN_SHARED_SECRET` + ports |
 | Build ລົ້ມດ້ວຍ OOM | Server RAM ບໍ່ພໍ (Flutter build) — ເພີ່ມ RAM/swap ຫຼື Build Timeout |
+| Build ລົ້ມ: `ERR_PNPM_NO_LOCKFILE` | ບໍ່ມີ `pnpm-lock.yaml` ໃນ repo — commit ໄຟລ໌ນີ້ (Dockerfile ໃຊ້ `--frozen-lockfile`) |
 | APK ຕໍ່ server ບໍ່ໄດ້ | APK ຕ້ອງ build ດ້ວຍ `--dart-define=SIGNALING_URL=wss://yonfile.example.com/ws` |
 
 ---
@@ -189,6 +191,14 @@ SIGNALING_URL=wss://yonfile.example.com/ws pnpm build:macos
 
 - ຄວນໃຊ້ `wss://` (TLS) ສະເໝີ ຖ້າ server ຢູ່ອິນເຕີເນັດ.
 - ຖ້າ server ຢູ່ LAN ແລະໃຊ້ `ws://` — ແອັບມີ `network_security_config` ອະນຸຍາດແລ້ວ.
+
+**macOS installer (.dmg):** ສ້າງຕົວຕິດຕັ້ງດ້ວຍ:
+```bash
+SIGNALING_URL=wss://yonfile.example.com/ws pnpm build:dmg
+# → dist/YonFile.dmg
+```
+sign ad-hoc ໂດຍ default. ຖ້າແຈກຈ່າຍໃຫ້ຄົນອື່ນ ໃຫ້ຕັ້ງ `SIGN_IDENTITY` (Developer ID)
+ແລ້ວ notarize ດ້ວຍ `xcrun notarytool`. ລາຍລະອຽດເບິ່ງ [scripts/build-dmg.sh](scripts/build-dmg.sh).
 
 ---
 

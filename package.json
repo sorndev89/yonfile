@@ -11,9 +11,10 @@
     "test:server": "pnpm --filter @yonfile/server test",
     "dev:web": "cd apps/web_client && flutter run -d chrome --web-port 8080",
     "build:web": "cd apps/web_client && flutter build web --release --wasm",
-    "build:apk": "cd apps/web_client && flutter build apk --release --dart-define=SIGNALING_URL=${SIGNALING_URL:-wss://yonfile.example/ws}",
+    "build:apk": "bash scripts/build-apk.sh",
     "build:appbundle": "cd apps/web_client && flutter build appbundle --release --dart-define=SIGNALING_URL=${SIGNALING_URL:-wss://yonfile.example/ws}",
     "build:macos": "cd apps/web_client && flutter build macos --release --dart-define=SIGNALING_URL=${SIGNALING_URL:-wss://yonfile.example/ws}",
+    "build:dmg": "bash scripts/build-dmg.sh",
     "test:web": "cd apps/web_client && flutter test",
     "analyze:web": "cd apps/web_client && flutter analyze"
   },

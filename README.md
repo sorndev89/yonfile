@@ -257,10 +257,16 @@ docker compose up -d --build
 
 **ສຳຄັນ:** native build **ຕ້ອງ** ກຳນົດ `SIGNALING_URL` ຕອນ build (ບໍ່ຄື web ທີ່ auto ໃຊ້ origin):
 ```bash
-SIGNALING_URL=wss://your-domain/ws pnpm build:apk       # → app-release.apk
+SIGNALING_URL=wss://your-domain/ws pnpm build:apk       # → dist/YonFile.apk
 SIGNALING_URL=wss://your-domain/ws pnpm build:appbundle # → Play Store .aab
-SIGNALING_URL=wss://your-domain/ws pnpm build:macos     # → .app
+SIGNALING_URL=wss://your-domain/ws pnpm build:macos     # → YonFile.app
+SIGNALING_URL=wss://your-domain/ws pnpm build:dmg       # → dist/YonFile.dmg
 ```
+
+**macOS installer (.dmg):** `build:dmg` ຮັບ `SIGNALING_URL`, `VERSION`, `APP_NAME`,
+`VOLUME_NAME`, `SKIP_BUILD` (1 = ໃຊ້ `.app` ເກົ່າ) ແລະ `SIGN_IDENTITY`
+(ສຳລັບ Developer ID signing). ເບິ່ງ [scripts/build-dmg.sh](scripts/build-dmg.sh).
+ໄຟລ໌ default sign ad-hoc → ຜູ້ໃຊ້ຕ້ອງ ຄລິກຂວາ → Open ຄັ້ງທຳອິດ.
 ຖ້າບໍ່ກຳນົດ ຈະໃຊ້ຄ່າ default `wss://yonfile.example/ws` (ໃຊ້ໄດ້ແຕ່ຕ້ອງແກ້). ແອັບຈະ**ຕໍ່ server ບໍ່ໄດ້**ຖ້າ
 URL ຜິດ. ການຕັ້ງຄ່າ platform ທີ່ກ່ຽວຂ້ອງໄດ້ເຮັດໃຫ້ແລ້ວ:
 - **Android:** `INTERNET` + `ACCESS_NETWORK_STATE` permission, `network_security_config`
@@ -296,8 +302,8 @@ URL ຜິດ. ການຕັ້ງຄ່າ platform ທີ່ກ່ຽວຂ�
 | Platform | ສະຖານະ | Artifact |
 | :-- | :-- | :-- |
 | **Web (PWA)** | ✅ ສ້າງໄດ້ | `apps/web_client/build/web/` |
-| **Android** | ✅ ສ້າງໄດ້ | `build/app/outputs/flutter-apk/app-release.apk` (ແອັບແທ້ ~98 MB) |
-| **macOS** | ✅ ສ້າງໄດ້ | `build/macos/Build/Products/Release/yonfile_client.app` |
+| **Android** | ✅ ສ້າງໄດ້ | `dist/YonFile.apk` (label: YonFile) |
+| **macOS** | ✅ ສ້າງໄດ້ | `YonFile.app` → `dist/YonFile.dmg` |
 | **iOS** | ⛔ ຕ້ອງການ iOS platform + Apple Dev Team | `.ipa` |
 | **Windows / Linux** | ⛔ ຕ້ອງ build ເທິງ OS ນັ້ນ | `.exe` / AppImage |
 
