@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum PeerScope { lan, pin }
+enum PeerScope { lan, pin, local }
 
 enum PeerDeviceType { mobile, tablet, desktop }
 
@@ -30,9 +30,11 @@ class PeerDevice {
       operatingSystem: _parseOperatingSystem(
         json['operatingSystem'] as String?,
       ),
-      scope: (json['scope'] as String?) == 'pin'
-          ? PeerScope.pin
-          : PeerScope.lan,
+      scope: switch (json['scope'] as String?) {
+        'pin' => PeerScope.pin,
+        'local' => PeerScope.local,
+        _ => PeerScope.lan,
+      },
     );
   }
 

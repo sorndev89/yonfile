@@ -32,8 +32,10 @@ class RadarPeers extends StatelessWidget {
           constraints.maxWidth / 2,
           constraints.maxHeight / 2,
         );
-        final radius =
-            (math.min(constraints.maxWidth, constraints.maxHeight) / 2) - 70;
+        final radius = math.max(
+          48.0,
+          (math.min(constraints.maxWidth, constraints.maxHeight) / 2) - 82,
+        );
 
         final widgets = <Widget>[];
         widgets.add(
@@ -45,10 +47,16 @@ class RadarPeers extends StatelessWidget {
         );
 
         final count = peers.length;
+        final rings = math.max(1, (count / 8).ceil());
         for (var i = 0; i < count; i++) {
-          final angle = -math.pi / 2 + (i * 2 * math.pi / count);
-          final dx = center.dx + radius * math.cos(angle) - 44;
-          final dy = center.dy + radius * math.sin(angle) - 44;
+          final ring = i ~/ 8;
+          final ringStart = ring * 8;
+          final ringCount = math.min(8, count - ringStart);
+          final ringRadius = radius * ((ring + 1) / rings);
+          final angle =
+              -math.pi / 2 + ((i - ringStart) * 2 * math.pi / ringCount);
+          final dx = center.dx + ringRadius * math.cos(angle) - 44;
+          final dy = center.dy + ringRadius * math.sin(angle) - 44;
           final peer = peers[i];
           widgets.add(
             Positioned(

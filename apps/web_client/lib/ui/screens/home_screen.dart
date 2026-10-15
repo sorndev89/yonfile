@@ -14,6 +14,8 @@ import '../../models/file_transfer_state.dart';
 import '../../models/peer_device.dart';
 import '../../models/picked_file.dart';
 import '../../services/local_signaling_host.dart';
+import '../../services/lan_discovery.dart';
+import '../../services/device_name_service.dart';
 import '../../services/file_picker_options.dart';
 import '../../services/signaling_service.dart';
 import '../../services/webrtc_service.dart';
@@ -46,6 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late final WebRtcService _webrtc;
   late final FileTransferController _fileTransfers;
   final LocalSignalingHost _localHost = LocalSignalingHost();
+  final LanDiscoveryService _lanDiscovery = LanDiscoveryService();
   late final String _onlineSignalingUrl;
 
   final List<StreamSubscription<dynamic>> _subs = [];
@@ -55,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final Map<String, PeerDevice> _lanPeers = {};
   final Map<String, PeerDevice> _pinPeers = {};
+  final Map<String, PeerDevice> _mdnsPeers = {};
   final Map<String, Future<void>> _pinConnectionAttempts = {};
 
   String _myName = 'ອຸປະກອນຂອງຂ້ອຍ';
@@ -86,16 +90,33 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadPrefs();
     _bindStreams();
     _signaling.connect();
+    unawaited(
+      _lanDiscovery.start(
+        onPeerFound: (peer) {
+          if (!mounted || peer.id == _peerId) return;
+          setState(() => _mdnsPeers[peer.id] = peer);
+        },
+        onPeerLost: (peerId) {
+          if (!mounted) return;
+          setState(() => _mdnsPeers.remove(peerId));
+        },
+      ),
+    );
   }
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('device_name');
-    if (saved != null && saved.isNotEmpty && mounted) {
-      setState(() => _myName = saved);
-    }
+    final saved = prefs.getString('device_name')?.trim();
+    final deviceName = await DeviceNameService.getDefaultName();
+    const oldFallbackName = 'ອຸປະກອນຂອງຂ້ອຍ';
+    final name = saved != null && saved.isNotEmpty && saved != oldFallbackName
+        ? saved
+        : deviceName;
+    if (!mounted) return;
+    setState(() => _myName = name);
     // Cache the saved name even if the WebSocket has not registered yet.
     _signaling.register(_myName, _myDeviceType, _myOperatingSystem);
+    if (_peerId case final id?) unawaited(_publishLocalPresence(id));
   }
 
   @override
@@ -139,6 +160,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _peerId = null;
             _lanPeers.clear();
             _pinPeers.clear();
+            unawaited(_lanDiscovery.unpublish());
           }
         });
       }),
@@ -148,6 +170,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _signaling.registeredStream.listen((id) {
         if (!mounted) return;
         setState(() => _peerId = id);
+        unawaited(_publishLocalPresence(id));
       }),
     );
 
@@ -212,6 +235,13 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }),
     );
+
+    _subs.add(
+      _webrtc.disconnects.listen((peerId) {
+        _fileTransfers.onPeerDisconnected(peerId);
+        _changePin(showMessage: false);
+      }),
+    );
   }
 
   @override
@@ -220,6 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
       sub.cancel();
     }
     _fileTransfers.dispose();
+    unawaited(_lanDiscovery.dispose());
     _webrtc.dispose();
     _signaling.dispose();
     _localHost.stop();
@@ -259,8 +290,18 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final p in _pinPeers.values) {
       merged[p.id] = p;
     }
+    for (final p in _mdnsPeers.values) {
+      merged[p.id] = p;
+    }
     return merged.values.toList();
   }
+
+  Future<void> _publishLocalPresence(String peerId) => _lanDiscovery.publish(
+    peerId: peerId,
+    name: _myName,
+    deviceType: _myDeviceType,
+    operatingSystem: _myOperatingSystem,
+  );
 
   String _peerName(String peerId) {
     for (final p in _peers) {
@@ -307,9 +348,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /* --------------------------- File sending ---------------------------- */
 
+  bool _hasPinAccess(PeerDevice peer) =>
+      peer.scope == PeerScope.pin ||
+      _pinPeers.containsKey(peer.id) ||
+      // An open data channel means this peer has already completed the PIN
+      // handshake, even when its current discovery metadata is LAN-scoped.
+      _webrtc.isOpen(peer.id);
+
   Future<void> _pickAndSend(PeerDevice peer) async {
-    final pinWasAlreadyJoined =
-        peer.scope == PeerScope.pin || _pinPeers.containsKey(peer.id);
+    final pinWasAlreadyJoined = _hasPinAccess(peer);
     if (!await _ensurePinAccess(peer)) return;
     if (!pinWasAlreadyJoined) {
       // First PIN entry establishes the connection. Let the user review the
@@ -398,9 +445,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<bool> _ensurePinAccess(PeerDevice peer) async {
-    if (peer.scope == PeerScope.pin || _pinPeers.containsKey(peer.id)) {
-      return true;
-    }
+    if (_hasPinAccess(peer)) return true;
 
     var enteredPin = '';
     final pin = await showDialog<String>(
@@ -574,6 +619,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (name.isEmpty) return;
     setState(() => _myName = name);
     _signaling.updateName(name);
+    if (_peerId case final id?) unawaited(_publishLocalPresence(id));
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('device_name', name);
   }
@@ -652,12 +698,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final peerId = _activePeerId;
     if (peerId == null) return;
     _fileTransfers.onPeerDisconnected(peerId);
-    await _webrtc.closeSession(peerId);
+    await _webrtc.disconnectPeer(peerId);
     if (!mounted) return;
-    setState(() {
-      _connectedPeerIds.remove(peerId);
-      _activePeerId = null;
-    });
+    _changePin(showMessage: false);
   }
 
   /* ------------------------------- Helpers ----------------------------- */
@@ -1087,6 +1130,12 @@ class _HomeScreenState extends State<HomeScreen> {
     return RadarScreen(
       self: _selfDevice,
       peers: _peers,
+      sameNetworkPeerIds: {
+        ..._mdnsPeers.keys,
+        if (_usingLocalSignaling) ..._lanPeers.keys,
+      },
+      externalIpPeerIds: _lanPeers.keys.toSet(),
+      pinPeerIds: _pinPeers.keys.toSet(),
       connectedPeerIds: _connectedPeerIds,
       signalingConnected: _status == SignalingStatus.connected,
       onTapPeer: _pickAndSend,

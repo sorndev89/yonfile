@@ -26,6 +26,10 @@
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>YonFile uses your local network to discover nearby devices and transfer files directly.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_yonfile._tcp</string>
+	</array>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>

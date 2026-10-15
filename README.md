@@ -258,7 +258,7 @@ docker compose up -d --build
 
 **ສຳຄັນ:** native build **ຕ້ອງ** ກຳນົດ `SIGNALING_URL` ຕອນ build (ບໍ່ຄື web ທີ່ auto ໃຊ້ origin):
 ```bash
-SIGNALING_URL=wss://your-domain/ws pnpm build:apk       # → dist/YonFile.apk
+SIGNALING_URL=wss://your-domain/ws pnpm build:apk       # → dist/YonFile.apk (debug without release key)
 SIGNALING_URL=wss://your-domain/ws pnpm build:appbundle # → Play Store .aab
 SIGNALING_URL=wss://your-domain/ws pnpm build:macos     # → YonFile.app
 SIGNALING_URL=wss://your-domain/ws pnpm build:dmg       # → dist/YonFile.dmg
@@ -275,9 +275,10 @@ URL ຜິດ. ການຕັ້ງຄ່າ platform ທີ່ກ່ຽວຂ�
 - **macOS:** entitlements `network.client` + `network.server` (ຈຳເປັນສຳລັບ signaling + WebRTC).
 - **iOS:** `NSAppTransportSecurity` (LAN cleartext) + `NSCameraUsageDescription`.
 
-ໃນ production Android release ຕ້ອງກຳນົດ signing key ເອງຜ່ານ environment variables
+`build:apk` ໃຊ້ debug build ຖ້າບໍ່ມີ release signing key ເພື່ອໃຫ້ສາມາດຕິດຕັ້ງທົດສອບໄດ້. APK ສຳລັບ release/Play Store ຕ້ອງກຳນົດ signing key ເອງຜ່ານ environment variables
 `YONFILE_RELEASE_STORE_FILE`, `YONFILE_RELEASE_STORE_PASSWORD`,
-`YONFILE_RELEASE_KEY_ALIAS`, ແລະ `YONFILE_RELEASE_KEY_PASSWORD`; build ຈະຢຸດພ້ອມຂໍ້ຄວາມຊັດເຈນຖ້າບໍ່ໄດ້ຕັ້ງ.
+`YONFILE_RELEASE_KEY_ALIAS`, ແລະ `YONFILE_RELEASE_KEY_PASSWORD`; ຈາກນັ້ນໃຊ້ `APK_BUILD_TYPE=release pnpm build:apk`.
+ໂດຍ default ສ້າງ APK ແຍກຕາມ ABI ສຳລັບ `android-arm64` ເພື່ອຫຼຸດຂະໜາດລົງ (`dist/YonFile.apk`). ຖ້າຕ້ອງການຮອງຮັບ ARM 32-bit ແລະ x86-64 ນຳ ໃຫ້ຕັ້ງ `APK_TARGET_PLATFORM=android-arm,android-arm64,android-x64`; script ຈະສ້າງ APK ແຍກແຕ່ລະ ABI ແລະວາງໄຟລ໌ເພີ່ມເຕີມໄວ້ໃນ `dist/`.
 
 **Coolify:** Build Pack = `Dockerfile`, Base Directory = `/`, Port = `3000`, ໃຊ້ **HTTPS**
 (WebRTC ຕ້ອງການ secure context). ການ build web ໃຊ້ **WASM/Skwasm** ເພື່ອຫຼີກລ້ຽງ

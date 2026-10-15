@@ -55,9 +55,11 @@ class WebRtcService {
 
   final _messageController = StreamController<PeerMessage>.broadcast();
   final _stateController = StreamController<PeerChannelState>.broadcast();
+  final _disconnectController = StreamController<String>.broadcast();
 
   Stream<PeerMessage> get messages => _messageController.stream;
   Stream<PeerChannelState> get channelStates => _stateController.stream;
+  Stream<String> get disconnects => _disconnectController.stream;
 
   bool isOpen(String peerId) =>
       _sessions[peerId]?.channel?.state ==
@@ -240,6 +242,12 @@ class WebRtcService {
         case 'candidate':
           await _handleCandidate(event);
           break;
+        case 'disconnect':
+          await closeSession(event.senderId);
+          if (!_disconnectController.isClosed) {
+            _disconnectController.add(event.senderId);
+          }
+          break;
       }
     } catch (error) {
       debugPrint('Signal handling error ($type): $error');
@@ -327,6 +335,12 @@ class WebRtcService {
     _teardown(peerId);
   }
 
+  /// Closes the local session and asks the remote peer to leave this pairing.
+  Future<void> disconnectPeer(String peerId) async {
+    signaling.sendSignal(peerId, const {'type': 'disconnect'});
+    await closeSession(peerId);
+  }
+
   void _teardown(String peerId) {
     _sessions.remove(peerId);
     if (!_stateController.isClosed) {
@@ -344,5 +358,6 @@ class WebRtcService {
     _sessions.clear();
     _messageController.close();
     _stateController.close();
+    _disconnectController.close();
   }
 }

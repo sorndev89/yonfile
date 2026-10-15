@@ -54,6 +54,10 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>YonFile uses your local network to discover nearby devices and transfer files directly.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_yonfile._tcp</string>
+	</array>
 	<!-- ຕ້ອງການກ້ອງສຳລັບສະແກນ QR -->
 	<key>NSCameraUsageDescription</key>
 	<string>ໃຊ້ກ້ອງເພື່ອສະແກນ QR Code ເຂົ້າຫ້ອງ PIN ໂຍນໄຟລ໌</string>
