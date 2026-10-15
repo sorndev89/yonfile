@@ -5,6 +5,7 @@ import '../../models/file_transfer_state.dart';
 import '../../models/incoming_file_offer.dart';
 import '../../models/peer_device.dart';
 import '../widgets/transfer_sheet.dart';
+import '../widgets/transfer_history_card.dart';
 
 /// Active peer session UI: connected devices, pending offers and transfers.
 class ConnectionScreen extends StatelessWidget {
@@ -20,6 +21,7 @@ class ConnectionScreen extends StatelessWidget {
     required this.onAccept,
     required this.onReject,
     required this.onCancelTransfer,
+    this.showHistory = true,
   });
 
   final PeerDevice self;
@@ -32,11 +34,13 @@ class ConnectionScreen extends StatelessWidget {
   final ValueChanged<String> onAccept;
   final ValueChanged<String> onReject;
   final ValueChanged<String> onCancelTransfer;
+  final bool showHistory;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final activeTransfer = transfers.where((transfer) => transfer.isActive);
+    final activeTransfers = activeTransfer.toList(growable: false);
     final label = activeTransfer.isEmpty
         ? 'ເຊື່ອມຕໍ່ແລ້ວ · ພ້ອມສົ່ງໄຟລ໌'
         : activeTransfer.first.status == TransferStatus.offering
@@ -165,7 +169,7 @@ class ConnectionScreen extends StatelessWidget {
                   onReject: () => onReject(offer.id),
                 ),
             ],
-            if (transfers.isNotEmpty) ...[
+            if (activeTransfers.isNotEmpty) ...[
               const SizedBox(height: 20),
               Text(
                 'ສະຖານະການໂອນໄຟລ໌',
@@ -175,10 +179,14 @@ class ConnectionScreen extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               TransferSheet(
-                transfers: transfers,
+                transfers: activeTransfers,
                 onCancel: onCancelTransfer,
                 showHeader: false,
               ),
+            ],
+            if (showHistory) ...[
+              const SizedBox(height: 18),
+              TransferHistoryCard(transfers: transfers),
             ],
           ],
         ),

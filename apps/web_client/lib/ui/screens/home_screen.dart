@@ -19,6 +19,7 @@ import '../../services/webrtc_service.dart';
 import '../widgets/home_header.dart';
 import '../widgets/pin_room_card.dart';
 import '../widgets/transfer_sheet.dart';
+import '../widgets/transfer_history_card.dart';
 import '../widgets/transfer_status_panel.dart';
 import 'connection_screen.dart';
 import 'qr_scanner_screen.dart';
@@ -175,10 +176,13 @@ class _HomeScreenState extends State<HomeScreen> {
               );
           }
         });
+        final pinRoomPeers = event.peers
+            .where((peer) => peer.id != _peerId)
+            .toList(growable: false);
         if (event.scope == PeerScope.pin &&
             event.pin == _ownPin &&
-            event.peers.length == 1) {
-          unawaited(_connectToPinPeer(event.peers.single));
+            pinRoomPeers.length == 1) {
+          unawaited(_connectToPinPeer(pinRoomPeers.single));
         }
       }),
     );
@@ -282,6 +286,11 @@ class _HomeScreenState extends State<HomeScreen> {
       deviceType: PeerDeviceType.desktop,
       scope: PeerScope.lan,
     );
+  }
+
+  bool get _hasActiveConnection {
+    final peer = _activePeer;
+    return peer != null && _connectedPeerIds.contains(peer.id);
   }
 
   /* --------------------------- File sending ---------------------------- */
@@ -814,33 +823,35 @@ class _HomeScreenState extends State<HomeScreen> {
         _buildTopBar(),
         _buildDeviceNameRow(),
         Expanded(child: _buildMainStage()),
-        Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _showPinSheet(),
-                  icon: const Icon(Icons.link_rounded),
-                  label: const Text('PIN'),
+        if (!_hasActiveConnection)
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _showPinSheet,
+                    icon: const Icon(Icons.link_rounded),
+                    label: const Text('PIN'),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _openTransferSheet,
-                  icon: const Icon(Icons.folder_rounded),
-                  label: const Text('ປະຫວັດ'),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _openTransferSheet,
+                    icon: const Icon(Icons.folder_rounded),
+                    label: const Text('ປະຫວັດ'),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
       ],
     );
   }
 
   Widget _buildDesktop(BoxConstraints constraints) {
+    final isConnected = _hasActiveConnection;
     return Column(
       children: [
         _buildTopBar(),
@@ -856,16 +867,22 @@ class _HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.fromLTRB(6, 6, 16, 16),
                   child: ListView(
                     children: [
-                      PinRoomCard(
-                        ownPin: _ownPin,
-                        joinedPin: _joinedPin,
-                        onJoinPin: _joinPin,
-                        onLeavePin: _leavePin,
-                        onChangePin: _changePin,
-                        onScan: _openScanner,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildTransferPanel(),
+                      if (isConnected) ...[
+                        TransferHistoryCard(
+                          transfers: _fileTransfers.transfers,
+                        ),
+                      ] else ...[
+                        PinRoomCard(
+                          ownPin: _ownPin,
+                          joinedPin: _joinedPin,
+                          onJoinPin: _joinPin,
+                          onLeavePin: _leavePin,
+                          onChangePin: _changePin,
+                          onScan: _openScanner,
+                        ),
+                        const SizedBox(height: 16),
+                        _buildTransferPanel(),
+                      ],
                     ],
                   ),
                 ),
@@ -909,6 +926,7 @@ class _HomeScreenState extends State<HomeScreen> {
       onAccept: _fileTransfers.acceptIncomingOffer,
       onReject: _fileTransfers.rejectIncomingOffer,
       onCancelTransfer: _fileTransfers.cancelTransfer,
+      showHistory: MediaQuery.sizeOf(context).width < 600,
     );
   }
 
