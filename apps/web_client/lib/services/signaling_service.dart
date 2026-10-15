@@ -30,15 +30,17 @@ class SignalEvent {
 
 /// SignalingService — WebSocket client ລົມກັບ Node.js Signaling Server.
 class SignalingService {
-  SignalingService({String? url}) : url = url ?? AppConfig.signalingUrl;
+  SignalingService({String? url}) : _url = url ?? AppConfig.signalingUrl;
 
-  final String url;
+  String _url;
+  String get url => _url;
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   Timer? _reconnectTimer;
   bool _manuallyClosed = false;
   bool _connecting = false;
+  int _endpointGeneration = 0;
 
   String? peerId;
   String? publicIp;
@@ -60,21 +62,24 @@ class SignalingService {
   Stream<String> get errorStream => _errorController.stream;
 
   bool get isConnected => _channel != null && peerId != null;
+  bool get usesLocalEndpoint => Uri.tryParse(_url)?.port == 3001;
 
   Future<void> connect() async {
     if (_manuallyClosed || _connecting || _channel != null) return;
     _connecting = true;
+    final generation = _endpointGeneration;
     _manuallyClosed = false;
     _statusController.add(SignalingStatus.connecting);
 
+    WebSocketChannel? channel;
     try {
-      final channel = WebSocketChannel.connect(Uri.parse(url));
+      channel = WebSocketChannel.connect(Uri.parse(_url));
+      _channel = channel;
       await channel.ready;
-      if (_manuallyClosed) {
+      if (_manuallyClosed || generation != _endpointGeneration) {
         await channel.sink.close(ws_status.normalClosure);
         return;
       }
-      _channel = channel;
 
       _subscription = channel.stream.listen(
         _handleRawMessage,
@@ -98,10 +103,32 @@ class SignalingService {
       });
     } catch (error) {
       debugPrint('Signaling connect failed: $error');
-      _scheduleReconnect();
+      if (identical(_channel, channel)) _channel = null;
+      if (generation == _endpointGeneration && !_manuallyClosed) {
+        _scheduleReconnect();
+      }
     } finally {
-      _connecting = false;
+      if (generation == _endpointGeneration) _connecting = false;
     }
+  }
+
+  /// Switches signaling to another endpoint, used for an offline LAN host.
+  Future<void> useEndpoint(String endpoint) async {
+    _endpointGeneration++;
+    _reconnectTimer?.cancel();
+    _manuallyClosed = true;
+    final old = _channel;
+    _channel = null;
+    peerId = null;
+    await _subscription?.cancel();
+    _subscription = null;
+    _connecting = false;
+    try {
+      await old?.sink.close(ws_status.goingAway);
+    } catch (_) {}
+    _url = endpoint;
+    _manuallyClosed = false;
+    await connect();
   }
 
   void _handleDisconnect() {

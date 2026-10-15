@@ -15,6 +15,7 @@ import '../../models/file_transfer_state.dart';
 import '../../models/peer_device.dart';
 import '../../models/picked_file.dart';
 import '../../services/file_chunker_service.dart';
+import '../../services/local_signaling_host.dart';
 import '../../services/signaling_service.dart';
 import '../../services/webrtc_service.dart';
 import '../widgets/peer_avatar.dart';
@@ -39,6 +40,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late final SignalingService _signaling;
   late final WebRtcService _webrtc;
+  final LocalSignalingHost _localHost = LocalSignalingHost();
+  late final String _onlineSignalingUrl;
   final FileChunkerService _chunker = FileChunkerService();
   final math.Random _random = math.Random.secure();
 
@@ -54,6 +57,8 @@ class _HomeScreenState extends State<HomeScreen> {
   PeerDeviceType _myDeviceType = PeerDeviceType.desktop;
   bool _deviceTypeResolved = false;
   bool _draggingOver = false;
+  bool _localHostRunning = false;
+  bool _usingLocalSignaling = false;
 
   String _ownPin = _randomPin();
   String? _joinedPin;
@@ -73,6 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _onlineSignalingUrl = AppConfig.signalingUrl;
     _signaling = SignalingService()..joinPin(_ownPin);
     _webrtc = WebRtcService(_signaling);
     _loadPrefs();
@@ -117,7 +123,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _subs.add(
       _signaling.statusStream.listen((status) {
         if (!mounted) return;
-        setState(() => _status = status);
+        setState(() {
+          _status = status;
+          if (status == SignalingStatus.disconnected) {
+            _peerId = null;
+            _lanPeers.clear();
+            _pinPeers.clear();
+          }
+        });
       }),
     );
 
@@ -152,6 +165,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     .map((p) => MapEntry(p.id, p)),
               );
           } else {
+            // Ignore delayed updates from a PIN room the user has already left.
+            if (event.pin != _ownPin) return;
             _pinPeers
               ..clear()
               ..addEntries(
@@ -174,6 +189,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     _webrtc.dispose();
     _signaling.dispose();
+    _localHost.stop();
     _transferRevision.dispose();
     super.dispose();
   }
@@ -329,10 +345,18 @@ class _HomeScreenState extends State<HomeScreen> {
       return false;
     }
 
+    if (!_signaling.isConnected) {
+      _snack('ຍັງບໍ່ເຊື່ອມຕໍ່ server ຈຶ່ງກວດ PIN ບໍ່ໄດ້');
+      return false;
+    }
+
     _joinPin(pin);
-    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
     while (mounted && DateTime.now().isBefore(deadline)) {
-      if (_pinPeers.containsKey(peer.id)) return true;
+      if (_ownPin == pin && _pinPeers.containsKey(peer.id)) {
+        _snack('PIN ຖືກຕ້ອງ ແລະ ${peer.name} ຢູ່ໃນຫ້ອງນີ້');
+        return true;
+      }
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
     if (mounted) {
@@ -685,8 +709,9 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _joinedPin = pin;
       _ownPin = pin;
+      _pinPeers.clear();
     });
-    _snack('ເຂົ້າຫ້ອງ $pin ແລ້ວ');
+    _snack('ກຳລັງເຂົ້າຫ້ອງ PIN');
   }
 
   void _leavePin() {
@@ -966,6 +991,128 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String sha256Hex(Uint8List bytes) => _chunker.sha256Of(bytes);
 
+  Future<void> _showOfflineOptions() async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('ໃຊ້ງານ offline ໃນ LAN'),
+        content: Text(
+          _localHostRunning
+              ? 'ກຳລັງເປີດ local host. ໃຫ້ອຸປະກອນອື່ນເຊື່ອມຕໍ່ IP ເຄື່ອງນີ້ທີ່ພອດ 3001.'
+              : 'ຕໍ່ອຸປະກອນໃນ Wi-Fi/LAN ດຽວກັນໄດ້ ເຖິງແມ່ນບໍ່ມີ Internet ຫຼື server ກາງ.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('ປິດ'),
+          ),
+          if (_usingLocalSignaling)
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'online'),
+              child: const Text('ກັບໄປໂໝດອອນລາຍ'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'join'),
+            child: const Text('ເຂົ້າດ້ວຍ IP'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, 'host'),
+            child: Text(
+              _localHostRunning ? 'ສະແດງ IP' : 'ເປີດ host ໃນເຄື່ອງນີ້',
+            ),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'host') {
+      await _startLocalHost();
+    } else if (action == 'join') {
+      await _joinLocalHost();
+    } else if (action == 'online') {
+      await _returnOnline();
+    }
+  }
+
+  Future<void> _startLocalHost() async {
+    try {
+      final addresses = await _localHost.start();
+      if (!mounted) return;
+      if (addresses.isEmpty) {
+        _snack('ບໍ່ພົບ IP ຂອງ LAN. ກວດສອບ Wi-Fi ແລ້ວລອງອີກຄັ້ງ');
+        await _localHost.stop();
+        return;
+      }
+      await _signaling.useEndpoint('ws://127.0.0.1:3001/ws');
+      if (!mounted) return;
+      setState(() {
+        _localHostRunning = true;
+        _usingLocalSignaling = true;
+      });
+      _snack(
+        'Offline host ພ້ອມແລ້ວ: '
+        '${addresses.map((address) => '$address:3001').join(', ')}',
+      );
+    } catch (error) {
+      _snack('ເປີດ offline host ບໍ່ສຳເລັດ: $error');
+    }
+  }
+
+  Future<void> _joinLocalHost() async {
+    final controller = TextEditingController();
+    final address = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('ເຂົ້າຫາ offline host'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(
+            labelText: 'IP ຂອງເຄື່ອງ host',
+            hintText: 'ຕົວຢ່າງ 192.168.1.20',
+          ),
+          onSubmitted: (value) => Navigator.pop(dialogContext, value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('ຍົກເລີກ'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('ເຊື່ອມຕໍ່'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (!mounted || address == null || address.isEmpty) return;
+    final host = address
+        .replaceFirst(RegExp(r'^ws://'), '')
+        .replaceFirst(RegExp(r'/ws$'), '')
+        .replaceFirst(RegExp(r':\d+$'), '');
+    try {
+      await _signaling.useEndpoint('ws://$host:3001/ws');
+      if (!mounted) return;
+      setState(() => _usingLocalSignaling = true);
+      _snack('ກຳລັງເຊື່ອມຫາ offline host $host');
+    } catch (error) {
+      _snack('ເຊື່ອມຫາ offline host ບໍ່ສຳເລັດ: $error');
+    }
+  }
+
+  Future<void> _returnOnline() async {
+    await _localHost.stop();
+    await _signaling.useEndpoint(_onlineSignalingUrl);
+    if (!mounted) return;
+    setState(() {
+      _localHostRunning = false;
+      _usingLocalSignaling = false;
+    });
+  }
+
   /* -------------------------------- Build ------------------------------ */
 
   @override
@@ -1019,6 +1166,18 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const Spacer(),
+          IconButton(
+            tooltip: _usingLocalSignaling
+                ? 'ໃຊ້ signaling server ອອນລາຍ'
+                : 'ຕັ້ງຄ່າໃຊ້ງານ offline ໃນ LAN',
+            onPressed: _showOfflineOptions,
+            icon: Icon(
+              _usingLocalSignaling
+                  ? Icons.wifi_tethering_rounded
+                  : Icons.wifi_tethering_off_rounded,
+              color: _usingLocalSignaling ? YonTheme.yonOrange : null,
+            ),
+          ),
           if (_transfers.any((t) => t.isActive))
             _BadgeIconButton(
               icon: Icons.swap_vert_rounded,

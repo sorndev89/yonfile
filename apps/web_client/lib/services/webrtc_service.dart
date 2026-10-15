@@ -128,7 +128,11 @@ class WebRtcService {
 
   Future<_PeerSession> _createSession(String peerId) async {
     final config = <String, dynamic>{
-      'iceServers': await AppConfig.iceServers(),
+      // On an isolated LAN, gather local host candidates without contacting
+      // public STUN services. The signaling relay remains local as well.
+      'iceServers': signaling.usesLocalEndpoint
+          ? <Map<String, dynamic>>[]
+          : await AppConfig.iceServers(),
       'sdpSemantics': 'unified-plan',
       'bundlePolicy': 'max-bundle',
       'rtcpMuxPolicy': 'require',
@@ -228,7 +232,8 @@ class WebRtcService {
 
   Future<void> _handleOffer(SignalEvent event) async {
     final session = await _ensureSession(event.senderId, initiator: false);
-    final collision = session.makingOffer ||
+    final collision =
+        session.makingOffer ||
         await session.pc.getSignalingState() !=
             RTCSignalingState.RTCSignalingStateStable;
     final localId = signaling.peerId;
