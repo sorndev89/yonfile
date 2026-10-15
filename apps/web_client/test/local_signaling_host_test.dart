@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yonfile_client/models/peer_device.dart';
 import 'package:yonfile_client/services/local_signaling_host.dart';
+import 'package:yonfile_client/services/signaling_service.dart';
 
 void main() {
   test('local host registers peers and relays PIN room signals', () async {
@@ -53,6 +55,29 @@ void main() {
       await secondMessages.cancel();
       await first.close();
       await second.close();
+      await host.stop();
+    }
+  });
+
+  test('signaling keeps a name change made before registration', () async {
+    final host = LocalSignalingHost();
+    await host.start(port: 0);
+    final signaling = SignalingService(url: 'ws://127.0.0.1:${host.port}/ws');
+    final matchingPeerUpdate = signaling.peersStream.firstWhere(
+      (event) =>
+          event.scope == PeerScope.lan &&
+          event.peers.any((peer) => peer.name == 'Saved Mac Name'),
+    );
+
+    try {
+      signaling.updateName('Saved Mac Name');
+      await signaling.connect();
+      final update = await matchingPeerUpdate.timeout(
+        const Duration(seconds: 2),
+      );
+      expect(update.peers.single.name, 'Saved Mac Name');
+    } finally {
+      signaling.dispose();
       await host.stop();
     }
   });

@@ -48,6 +48,7 @@ class SignalingService {
   String _name = 'ອຸປະກອນ YonFile';
   PeerDeviceType _deviceType = PeerDeviceType.desktop;
   String? _joinedPin;
+  bool _pendingNameUpdate = false;
 
   final _statusController = StreamController<SignalingStatus>.broadcast();
   final _registeredController = StreamController<String>.broadcast();
@@ -159,6 +160,10 @@ class SignalingService {
         peerId = msg['peerId'] as String?;
         publicIp = msg['ip'] as String?;
         if (peerId != null) _registeredController.add(peerId!);
+        if (peerId != null && _pendingNameUpdate) {
+          _send({'type': 'update-name', 'name': _name});
+          _pendingNameUpdate = false;
+        }
         if (_joinedPin != null) {
           _send({'type': 'join-pin', 'pin': _joinedPin});
         }
@@ -204,12 +209,23 @@ class SignalingService {
         'name': _name,
         'deviceType': _deviceType.name,
       });
+      _pendingNameUpdate = false;
+    } else {
+      // A register message may already be in flight on a newly opened socket.
+      _pendingNameUpdate = true;
     }
   }
 
   void updateName(String name) {
     _name = name.trim().isEmpty ? _name : name.trim();
-    _send({'type': 'update-name', 'name': _name});
+    if (isConnected) {
+      _send({'type': 'update-name', 'name': _name});
+      _pendingNameUpdate = false;
+    } else {
+      // Registration may still be in flight; repeat the update after the
+      // server assigns this socket a peer id.
+      _pendingNameUpdate = true;
+    }
   }
 
   void joinPin(String pin) {

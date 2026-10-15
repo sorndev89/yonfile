@@ -71,6 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final Map<String, String> _activeIncomingId = {};
   final Map<String, String> _transferPeers = {};
   final Set<String> _cancelled = {};
+  final Set<String> _connectedPeerIds = {};
 
   int get _incomingReservedBytes =>
       _incoming.values.fold(0, (total, file) => total + file.fileSize);
@@ -92,7 +93,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (saved != null && saved.isNotEmpty && mounted) {
       setState(() => _myName = saved);
     }
-    if (_signaling.isConnected) _signaling.register(_myName, _myDeviceType);
+    // Cache the saved name even if the WebSocket has not registered yet.
+    _signaling.register(_myName, _myDeviceType);
   }
 
   @override
@@ -180,6 +182,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     _subs.add(_webrtc.messages.listen(_onPeerMessage));
+    _subs.add(
+      _webrtc.channelStates.listen((event) {
+        if (!mounted) return;
+        setState(() {
+          if (event.isOpen) {
+            _connectedPeerIds.add(event.peerId);
+          } else {
+            _connectedPeerIds.remove(event.peerId);
+          }
+        });
+      }),
+    );
   }
 
   @override
@@ -1346,6 +1360,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: _RadarPeers(
                   self: _selfDevice,
                   peers: _peers,
+                  connectedPeerIds: _connectedPeerIds,
                   onTapPeer: _pickAndSend,
                   onLongPressPeer: _sendTextMessage,
                   onDropFiles: (peer, files) => _sendFiles(peer, files),
@@ -1471,6 +1486,7 @@ class _RadarPeers extends StatelessWidget {
   const _RadarPeers({
     required this.self,
     required this.peers,
+    required this.connectedPeerIds,
     required this.onTapPeer,
     required this.onLongPressPeer,
     required this.onDropFiles,
@@ -1478,6 +1494,7 @@ class _RadarPeers extends StatelessWidget {
 
   final PeerDevice self;
   final List<PeerDevice> peers;
+  final Set<String> connectedPeerIds;
   final void Function(PeerDevice) onTapPeer;
   final void Function(PeerDevice) onLongPressPeer;
   final void Function(PeerDevice, List<PickedFile>) onDropFiles;
@@ -1517,6 +1534,7 @@ class _RadarPeers extends StatelessWidget {
                 child: PeerAvatar(
                   peer: peer,
                   diameter: 76,
+                  isConnected: connectedPeerIds.contains(peer.id),
                   onTap: () => onTapPeer(peer),
                   onFilesDropped: (files) => onDropFiles(peer, files),
                 ),

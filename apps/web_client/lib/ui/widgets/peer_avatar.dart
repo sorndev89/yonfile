@@ -10,6 +10,7 @@ class PeerAvatar extends StatefulWidget {
     super.key,
     required this.peer,
     this.isSelf = false,
+    this.isConnected = false,
     this.onTap,
     this.onFilesDropped,
     this.diameter = 92,
@@ -17,6 +18,7 @@ class PeerAvatar extends StatefulWidget {
 
   final PeerDevice peer;
   final bool isSelf;
+  final bool isConnected;
   final VoidCallback? onTap;
   final void Function(List<PickedFile> files)? onFilesDropped;
   final double diameter;
@@ -32,43 +34,74 @@ class _PeerAvatarState extends State<PeerAvatar> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    Widget avatar = AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      width: widget.diameter,
-      height: widget.diameter,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: widget.isSelf ? null : YonTheme.primaryGradient,
-        color: widget.isSelf
-            ? (isDark ? YonTheme.slateDarkCard : Colors.white)
-            : null,
-        border: widget.isSelf
-            ? Border.all(color: YonTheme.yonOrange, width: 1.5)
-            : Border.all(color: YonTheme.yonOrange.withValues(alpha: 0.4)),
-        boxShadow: [
-          BoxShadow(
-            color: YonTheme.yonOrange.withValues(alpha: _hovering ? 0.45 : 0.22),
-            blurRadius: _hovering ? 26 : 14,
-            spreadRadius: _hovering ? 2 : 0,
+    Widget avatar = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: widget.diameter,
+          height: widget.diameter,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: widget.isSelf ? null : YonTheme.primaryGradient,
+            color: widget.isSelf
+                ? (isDark ? YonTheme.slateDarkCard : Colors.white)
+                : null,
+            border: widget.isSelf
+                ? Border.all(color: YonTheme.yonOrange, width: 1.5)
+                : Border.all(color: YonTheme.yonOrange.withValues(alpha: 0.4)),
+            boxShadow: [
+              BoxShadow(
+                color: YonTheme.yonOrange.withValues(
+                  alpha: _hovering ? 0.45 : 0.22,
+                ),
+                blurRadius: _hovering ? 26 : 14,
+                spreadRadius: _hovering ? 2 : 0,
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Center(
-        child: Icon(
-          widget.peer.icon,
-          size: widget.diameter * 0.42,
-          color: widget.isSelf
-              ? YonTheme.yonOrange
-              : Colors.white,
+          child: Center(
+            child: Icon(
+              widget.peer.icon,
+              size: widget.diameter * 0.42,
+              color: widget.isSelf ? YonTheme.yonOrange : Colors.white,
+            ),
+          ),
         ),
-      ),
+        if (!widget.isSelf && widget.isConnected)
+          Positioned(
+            right: -2,
+            bottom: 1,
+            child: Tooltip(
+              message: 'ເຊື່ອມຕໍ່ຢູ່',
+              child: Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: YonTheme.emeraldGreen,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isDark ? YonTheme.slateDarkBg : Colors.white,
+                    width: 2,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.link_rounded,
+                  size: 13,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
 
     if (!widget.isSelf && widget.onFilesDropped != null) {
       final baseAvatar = avatar;
       avatar = DragTarget<List<PickedFile>>(
         onWillAcceptWithDetails: (_) => true,
-        onAcceptWithDetails: (details) => widget.onFilesDropped?.call(details.data),
+        onAcceptWithDetails: (details) =>
+            widget.onFilesDropped?.call(details.data),
         builder: (context, candidate, rejected) {
           final active = candidate.isNotEmpty;
           return AnimatedScale(
@@ -106,6 +139,14 @@ class _PeerAvatarState extends State<PeerAvatar> {
               child: Text(
                 'ຕົວທ່ານ',
                 style: TextStyle(fontSize: 10, color: YonTheme.yonOrange),
+              ),
+            ),
+          if (!widget.isSelf && widget.isConnected)
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: Text(
+                'ເຊື່ອມຕໍ່ຢູ່',
+                style: TextStyle(fontSize: 10, color: YonTheme.emeraldGreen),
               ),
             ),
         ],
