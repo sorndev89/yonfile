@@ -30,11 +30,42 @@ android {
         versionName = flutter.versionName
     }
 
+    val releaseStoreFile = System.getenv("YONFILE_RELEASE_STORE_FILE")
+    val releaseStorePassword = System.getenv("YONFILE_RELEASE_STORE_PASSWORD")
+    val releaseKeyAlias = System.getenv("YONFILE_RELEASE_KEY_ALIAS")
+    val releaseKeyPassword = System.getenv("YONFILE_RELEASE_KEY_PASSWORD")
+    val hasReleaseSigning = listOf(
+        releaseStoreFile,
+        releaseStorePassword,
+        releaseKeyAlias,
+        releaseKeyPassword,
+    ).all { !it.isNullOrBlank() }
+    val releaseTaskRequested = gradle.startParameter.taskNames.any {
+        it.contains("release", ignoreCase = true)
+    }
+
+    if (hasReleaseSigning) {
+        signingConfigs.create("release") {
+            storeFile = file(releaseStoreFile!!)
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            if (!hasReleaseSigning && releaseTaskRequested) {
+                throw GradleException(
+                    "Set YONFILE_RELEASE_STORE_FILE, YONFILE_RELEASE_STORE_PASSWORD, " +
+                        "YONFILE_RELEASE_KEY_ALIAS, and YONFILE_RELEASE_KEY_PASSWORD to build a signed release."
+                )
+            }
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

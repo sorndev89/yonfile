@@ -5,9 +5,13 @@ import 'dart:io';
 /// Small, in-memory signaling relay for transfers on an isolated LAN.
 /// File bytes still travel directly through WebRTC between devices.
 class LocalSignalingHost {
+  static const int _maxMessageBytes = 256 * 1024;
+  static const int _maxPeers = 64;
+  static const int _maxPinAttemptsPerMinute = 20;
   HttpServer? _server;
   final Map<String, _LocalPeer> _peers = {};
   int _sequence = 0;
+  final Map<String, List<DateTime>> _pinAttempts = {};
   int get port => _server?.port ?? 0;
 
   Future<List<String>> start({int port = 3001}) async {
@@ -29,10 +33,19 @@ class LocalSignalingHost {
     socket.listen(
       (dynamic raw) {
         try {
-          final message = jsonDecode(raw as String) as Map<String, dynamic>;
+          if (raw is! String || utf8.encode(raw).length > _maxMessageBytes) {
+            socket.close(WebSocketStatus.messageTooBig, 'Message too large');
+            return;
+          }
+          final message = jsonDecode(raw) as Map<String, dynamic>;
           final type = message['type'];
           if (type == 'register') {
             if (peer == null) {
+              if (_peers.length >= _maxPeers) {
+                _sendRaw(socket, {'type': 'error', 'code': 'server-full'});
+                socket.close(WebSocketStatus.policyViolation, 'Server full');
+                return;
+              }
               peer = _LocalPeer(
                 id: 'lan-${DateTime.now().microsecondsSinceEpoch}-${_sequence++}',
                 socket: socket,
@@ -81,6 +94,17 @@ class LocalSignalingHost {
         if (peer.pin != null) _broadcastPin(peer.pin!);
         break;
       case 'join-pin':
+        final now = DateTime.now();
+        final attempts = (_pinAttempts[peer.id] ?? [])
+            .where((attempt) => now.difference(attempt).inMinutes < 1)
+            .toList();
+        if (attempts.length >= _maxPinAttemptsPerMinute) {
+          _pinAttempts[peer.id] = attempts;
+          _send(peer, {'type': 'error', 'code': 'pin-rate-limited'});
+          return;
+        }
+        attempts.add(now);
+        _pinAttempts[peer.id] = attempts;
         final pin = (message['pin'] as String? ?? '').trim();
         if (!RegExp(r'^\d{6}$').hasMatch(pin)) {
           _send(peer, {'type': 'error', 'code': 'invalid-pin'});
@@ -117,6 +141,7 @@ class LocalSignalingHost {
 
   void _remove(_LocalPeer? peer) {
     if (peer == null || _peers.remove(peer.id) == null) return;
+    _pinAttempts.remove(peer.id);
     final pin = peer.pin;
     _broadcastLan();
     if (pin != null) _broadcastPin(pin);
@@ -205,6 +230,7 @@ class LocalSignalingHost {
       await peer.socket.close(WebSocketStatus.goingAway);
     }
     _peers.clear();
+    _pinAttempts.clear();
     await _server?.close(force: true);
     _server = null;
   }

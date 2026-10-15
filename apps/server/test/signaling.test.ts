@@ -6,6 +6,7 @@ import { startServer, type RunningServer } from '../src/index';
 
 let server: RunningServer;
 let baseUrl: string;
+let previousTrustProxy: string | undefined;
 
 function connect(clientIp?: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
@@ -47,12 +48,16 @@ function send(ws: WebSocket, message: Message): void {
 }
 
 before(async () => {
+  previousTrustProxy = process.env.TRUST_PROXY;
+  process.env.TRUST_PROXY = 'true';
   server = await startServer(0);
   baseUrl = `ws://127.0.0.1:${server.port}/ws`;
 });
 
 after(async () => {
   await server.close();
+  if (previousTrustProxy === undefined) delete process.env.TRUST_PROXY;
+  else process.env.TRUST_PROXY = previousTrustProxy;
 });
 
 test('register returns a peerId', async () => {
@@ -95,13 +100,21 @@ test('invalid PINs are rejected by the signaling server', async () => {
   }
 });
 
-test('ICE endpoint issues short-lived Coturn REST credentials', async () => {
+test('ICE endpoint issues short-lived credentials and rate limits repeated requests', async () => {
   const oldUrl = process.env.TURN_URL;
   const oldSecret = process.env.TURN_SHARED_SECRET;
   process.env.TURN_URL = 'turn:turn.example.test:3478';
   process.env.TURN_SHARED_SECRET = 'test-only-shared-secret';
   try {
-    const response = await fetch(`http://127.0.0.1:${server.port}/api/ice-servers`);
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const response = await fetch(`http://127.0.0.1:${server.port}/api/ice-servers`);
+      assert.equal(response.status, 200);
+    }
+    const limited = await fetch(`http://127.0.0.1:${server.port}/api/ice-servers`);
+    assert.equal(limited.status, 429);
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/ice-servers`, {
+      headers: { 'x-forwarded-for': '192.0.2.77' },
+    });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
     const body = await response.json() as { iceServers: Array<Record<string, string>> };
@@ -159,6 +172,29 @@ test('two peers on same IP see each other (LAN scope)', async () => {
       'macos',
     );
   } finally {
+    a.close();
+    b.close();
+  }
+});
+
+test('forwarded client IP headers are ignored unless proxy trust is enabled', async () => {
+  process.env.TRUST_PROXY = 'false';
+  const a = await connect('198.51.100.10');
+  const b = await connect('203.0.113.20');
+  try {
+    send(a, { type: 'register', name: 'A' });
+    const aId = (await waitFor(a, (m) => m.type === 'registered')).peerId;
+    const updatePromise = waitFor(
+      a,
+      (m) => m.type === 'peers-updated' && m.scope === 'lan',
+    );
+    send(b, { type: 'register', name: 'B' });
+    const bId = (await waitFor(b, (m) => m.type === 'registered')).peerId;
+    const update = await updatePromise;
+    assert.ok(update.peers.some((peer: any) => peer.id === aId));
+    assert.ok(update.peers.some((peer: any) => peer.id === bId));
+  } finally {
+    process.env.TRUST_PROXY = 'true';
     a.close();
     b.close();
   }

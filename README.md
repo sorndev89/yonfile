@@ -49,12 +49,12 @@
 | 15 | **ປອດໄພ** | DTLS E2E, Zero-Storage, ຈຳກັດຂະໜາດ, ປ້ອງກັນ IP/PIN |
 
 ### ລາຍລະອຽດການສົ່ງໄຟລ໌
-- **Chunk:** ຕັດໄຟລ໌ອອກເປັນຕ່ອນລະ **64 KB** (`65,536 bytes`).
+- **Chunk:** ຕັດໄຟລ໌ອອກເປັນຕ່ອນລະ **16 KB** (`16,384 bytes`).
 - **Backpressure:** ກ່ອນສົ່ງແຕ່ລະ chunk ຈະກວດ `bufferedAmount`; ຖ້າເກີນ **1 MB** ຈະລໍຖ້າ
   (poll ທຸກ 20ms) ຈົນ buffer ຫຼຸດລົງ ເພື່ອບໍ່ໃຫ້ browser/ອຸປະກອນ ຄ້າງ.
 - **ກວດສອບ:** ສົ່ງ SHA-256 ຕອນ `eof`; ປາຍທາງກວດທັງ **ຂະໜາດ** ແລະ **SHA-256** ກ່ອນ
   ບັນທຶກ ແລະ ຕອບກັບ `transfer-complete`.
-- **ຂີດຈຳກັດ:** ຂະໜາດລວມຕໍ່ການສົ່ງ/ຮັບ ສູງສຸດ **512 MB** (ຈຳກັດ memory).
+- **ຂີດຈຳກັດ:** ຂະໜາດສູງສຸດ **512 MB**. ທັງຝັ່ງສົ່ງແລະຮັບ stream ເປັນຕ່ອນ; ຝັ່ງຮັບຂຽນໃສ່ temp file ແລະສົ່ງ ACK ທຸກ **256 KB** ຫຼັງ flush ລົງ storage. ກວດ SHA-256 ກ່ອນເປີດ save dialog ແລະຢືນຢັນສຳເລັດ.
 
 ---
 
@@ -83,9 +83,8 @@ Router ພາຍໃນ ບໍ່ເປືອງອິນເຕີເນັດພ
 [Sender]                                                    [Receiver]
    |--- 1. JSON {"type":"offer-file","id","name","size","mime"} ---->|
    |<-- 2. JSON {"type":"accept-file","id"}  ຫຼື "reject-file" -------|
-   |--- 3. Binary Chunk #1 (64 KB) --------------------------------->|
-   |--- 4. Binary Chunk #2 (64 KB) --------------------------------->|
-   |    ... (ກວດ bufferedAmount < 1 MB ຕະຫຼອດເວລາ) ...                |
+   |--- 3. Binary chunks (16 KB, max 256 KB per window) ------------>|
+   |<-- 4. JSON {"type":"chunk-ack","id","received"} ---------------|
    |--- 5. JSON {"type":"eof","id","sha256"} ----------------------->|
    |<-- 6. JSON {"type":"transfer-complete","id","verified"} --------|
 ```
@@ -95,7 +94,9 @@ Router ພາຍໃນ ບໍ່ເປືອງອິນເຕີເນັດພ
 | `offer-file` | Sender → Receiver | ສະເໜີສົ່ງໄຟລ໌ (id, name, size, mime) |
 | `accept-file` | Receiver → Sender | ຍອມຮັບ |
 | `reject-file` | Receiver → Sender | ປະຕິເສດ / ໄຟລ໌ໃຫຍ່ເກີນ / ຊ່ອງບໍ່ຫວ່າງ |
-| *(binary)* | Sender → Receiver | ຕ່ອນຂໍ້ມູນ 64 KB |
+| *(binary)* | Sender → Receiver | ຕ່ອນຂໍ້ມູນ 16 KB |
+| `chunk-ack` | Receiver → Sender | ຢືນຢັນ bytes ຫຼັງຂຽນລົງ storage ທຸກ 256 KB |
+| `flush-window` | Sender → Receiver | ຂໍ flush ແລະ ACK ຂອງຊ່ວງສຸດທ້າຍ |
 | `eof` | Sender → Receiver | ສິ້ນສຸດ + SHA-256 |
 | `transfer-complete` | Receiver → Sender | ຜົນກວດສອບ |
 | `cancel-file` | ທັງສອງ | ຍົກເລີກ |
@@ -274,6 +275,10 @@ URL ຜິດ. ການຕັ້ງຄ່າ platform ທີ່ກ່ຽວຂ�
 - **macOS:** entitlements `network.client` + `network.server` (ຈຳເປັນສຳລັບ signaling + WebRTC).
 - **iOS:** `NSAppTransportSecurity` (LAN cleartext) + `NSCameraUsageDescription`.
 
+ໃນ production Android release ຕ້ອງກຳນົດ signing key ເອງຜ່ານ environment variables
+`YONFILE_RELEASE_STORE_FILE`, `YONFILE_RELEASE_STORE_PASSWORD`,
+`YONFILE_RELEASE_KEY_ALIAS`, ແລະ `YONFILE_RELEASE_KEY_PASSWORD`; build ຈະຢຸດພ້ອມຂໍ້ຄວາມຊັດເຈນຖ້າບໍ່ໄດ້ຕັ້ງ.
+
 **Coolify:** Build Pack = `Dockerfile`, Base Directory = `/`, Port = `3000`, ໃຊ້ **HTTPS**
 (WebRTC ຕ້ອງການ secure context). ການ build web ໃຊ້ **WASM/Skwasm** ເພື່ອຫຼີກລ້ຽງ
 ບັນຫາ CanvasKit ທີ່ສະແດງກອບສີເທົາທັບ radar ໃນ Chrome.
@@ -294,6 +299,8 @@ URL ຜິດ. ການຕັ້ງຄ່າ platform ທີ່ກ່ຽວຂ�
   Server ຈະອອກ **Coturn REST credentials** ອາຍຸ 10 ນາທີ ຜ່ານ `GET /api/ice-servers`
   (HMAC-SHA1) — **ຢ່າຝັງ shared secret ໃນ browser build**.
 - ເປີດ UDP `3478` ແລະ relay ports `49152–65535` ຜ່ານ firewall.
+- ຫາກ server ຢູ່ຫຼັງ reverse proxy ໃຫ້ຕັ້ງ `TRUST_PROXY=true` ເມື່ອ proxy ລຶບແລະຂຽນທັບ `X-Forwarded-For`/`CF-Connecting-IP` ຈາກ client ເອງ. ຄ່າເລີ່ມຕົ້ນບໍ່ເຊື່ອ forwarded headers.
+- ຖ້າ web client ຢູ່ຄົນລະ origin ກັບ signaling server ໃຫ້ລະບຸ origin ໃນ `ALLOWED_ORIGINS` (comma-separated). Same-origin ແລະ native clients ບໍ່ຕ້ອງຕັ້ງຄ່ານີ້.
 
 ---
 
@@ -302,7 +309,7 @@ URL ຜິດ. ການຕັ້ງຄ່າ platform ທີ່ກ່ຽວຂ�
 | Platform | ສະຖານະ | Artifact |
 | :-- | :-- | :-- |
 | **Web (PWA)** | ✅ ສ້າງໄດ້ | `apps/web_client/build/web/` |
-| **Android** | ✅ ສ້າງໄດ້ | `dist/YonFile.apk` (label: YonFile) |
+| **Android** | ✅ ສ້າງໄດ້ | `dist/YonFile.apk` (ຊື່ສະແດງ: ໂຍນໄຟລ໌) |
 | **macOS** | ✅ ສ້າງໄດ້ | `YonFile.app` → `dist/YonFile.dmg` |
 | **iOS** | ⛔ ຕ້ອງການ iOS platform + Apple Dev Team | `.ipa` |
 | **Windows / Linux** | ⛔ ຕ້ອງ build ເທິງ OS ນັ້ນ | `.exe` / AppImage |
@@ -318,7 +325,8 @@ cd apps/web_client && flutter build ios --release --no-codesign
 
 ## 13. ຂີດຈຳກັດທີ່ຮູ້
 
-- ໄຟລ໌ຖືກໂຫຼດເຂົ້າ memory ທັງໝົດກ່ອນສົ່ງ → ຈຳກັດ **512 MB/ຄັ້ງ**.
+- ຝັ່ງຮັບ stream ລົງ temp storage ແລະຈຳກັດ buffer ດ້ວຍ ACK window; ກ່ອນໂຍນໄຟລ໌ໃຫຍ່ໃຫ້ເຫຼືອພື້ນທີ່ storage ຢ່າງໜ້ອຍເທົ່າຂະໜາດໄຟລ໌.
+- ປະຫວັດການສົ່ງສູງສຸດ 100 ລາຍການຖືກເກັບໃນ SharedPreferences ຂອງເຄື່ອງ; ໃຊ້ປຸ່ມລ້າງປະຫວັດໃນໜ້າການໂອນ.
 - ການຈັດກຸ່ມ LAN ອີງ Public IP (ບໍ່ຢືນຢັນ LAN 100%) — ໃຊ້ PIN ເມື່ອບໍ່ແນ່ໃຈ.
 - Signaling ເກັບ peer ໃນ memory ຢ່າງດຽວ (ຮອງຮັບ single-instance).
 - ການສະແກນ QR ຕ້ອງການ ກ້ອງ + HTTPS.
@@ -329,7 +337,7 @@ cd apps/web_client && flutter build ios --release --no-codesign
 
 - [x] Milestone 1 — Core Setup: pnpm Monorepo + Signaling Server (LAN pairing)
 - [x] Milestone 2 — Flutter UI & Radar: Adaptive Layout, radar, PIN/QR
-- [x] Milestone 3 — WebRTC File Chunking: 64KB, progress, SHA-256
+- [x] Milestone 3 — WebRTC File Chunking: 16KB, backpressure, progress, SHA-256
 - [x] Milestone 4 — PWA & Coolify Deployment: manifest + multi-stage Dockerfile
 - [x] Milestone 5 (ບາງສ່ວນ) — Android APK + macOS app
 - [ ] Milestone 5 (ຕໍ່) — iOS `.ipa` + Windows/Linux

@@ -4,6 +4,8 @@ PODS:
   - file_picker_darwin (1.0.0):
     - Flutter
     - FlutterMacOS
+  - file_selector_macos (0.0.1):
+    - FlutterMacOS
   - flutter_webrtc (1.6.2):
     - FlutterMacOS
     - WebRTC-SDK (= 150.7871.01)
@@ -19,6 +21,7 @@ PODS:
 DEPENDENCIES:
   - desktop_drop (from `Flutter/ephemeral/.symlinks/plugins/desktop_drop/macos`)
   - file_picker_darwin (from `Flutter/ephemeral/.symlinks/plugins/file_picker_darwin/darwin`)
+  - file_selector_macos (from `Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos`)
   - flutter_webrtc (from `Flutter/ephemeral/.symlinks/plugins/flutter_webrtc/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - mobile_scanner (from `Flutter/ephemeral/.symlinks/plugins/mobile_scanner/darwin`)
@@ -33,6 +36,8 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/desktop_drop/macos
   file_picker_darwin:
     :path: Flutter/ephemeral/.symlinks/plugins/file_picker_darwin/darwin
+  file_selector_macos:
+    :path: Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos
   flutter_webrtc:
     :path: Flutter/ephemeral/.symlinks/plugins/flutter_webrtc/macos
   FlutterMacOS:
@@ -45,6 +50,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   desktop_drop: 10a3e6a7fa9dbe350541f2574092fecfa345a07b
   file_picker_darwin: 4c2b9a50ea44cb3b071381ea0cf48591bdd80251
+  file_selector_macos: 9e9e068e90ebee155097d00e89ae91edb2374db7
   flutter_webrtc: af708ba091a5d71e101f9f631a9f96c107581a3d
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   mobile_scanner: 9157936403f5a0644ca3779a38ff8404c5434a93

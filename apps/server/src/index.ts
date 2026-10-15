@@ -8,18 +8,44 @@ import type { InboundMessage, SignalMessage } from './types';
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+const allowedOrigins = new Set(
+  (process.env.ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  maxPayload: 256 * 1024,
+  verifyClient: ({ origin, req }, done) => {
+    // Native apps omit Origin. Browsers must use the same host or an explicit allowlist.
+    if (!origin) return done(true);
+    try {
+      const parsed = new URL(origin);
+      const sameHost = parsed.host === req.headers.host;
+      done(sameHost || allowedOrigins.has(parsed.origin), 403, 'Origin not allowed');
+    } catch {
+      done(false, 403, 'Invalid Origin');
+    }
+  },
+});
 const rooms = new RoomManager();
 const pinAttempts = new Map<string, number[]>();
 const MAX_SIGNAL_BYTES = 256 * 1024;
 const PIN_ATTEMPT_WINDOW_MS = 60_000;
 const MAX_PIN_ATTEMPTS_PER_WINDOW = 20;
+const iceAttempts = new Map<string, number[]>();
+const MAX_ICE_REQUESTS_PER_WINDOW = 30;
 
 /**
  * ດຶງ Public IP ແທ້ຈາກ Reverse Proxy (Coolify / Traefik / Cloudflare / Nginx).
  * ໃຊ້ສຳລັບຈັດກຸ່ມອຸປະກອນ LAN ດຽວກັນ (Public IP ດຽວກັນ).
  */
 function extractClientIp(req: http.IncomingMessage): string {
+  if (process.env.TRUST_PROXY !== 'true') {
+    return req.socket.remoteAddress || '127.0.0.1';
+  }
   const cfIp = req.headers['cf-connecting-ip'];
   const xRealIp = req.headers['x-real-ip'];
   const xForwardedFor = req.headers['x-forwarded-for'];
@@ -187,7 +213,27 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', activePeers: rooms.size });
 });
 
-app.get('/api/ice-servers', (_req, res) => {
+app.get('/api/ice-servers', (req, res) => {
+  const ip = extractClientIp(req);
+  const now = Date.now();
+  const recentAttempts = (iceAttempts.get(ip) ?? []).filter(
+    (time) => now - time < PIN_ATTEMPT_WINDOW_MS,
+  );
+  if (recentAttempts.length >= MAX_ICE_REQUESTS_PER_WINDOW) {
+    res.setHeader('Retry-After', '60');
+    res.status(429).json({ error: 'rate_limited' });
+    return;
+  }
+  recentAttempts.push(now);
+  iceAttempts.set(ip, recentAttempts);
+  if (iceAttempts.size > 10_000) {
+    for (const [key, times] of iceAttempts) {
+      if (times.every((time) => now - time >= PIN_ATTEMPT_WINDOW_MS)) {
+        iceAttempts.delete(key);
+      }
+    }
+  }
+
   const stunUrl = process.env.STUN_URL || 'stun:stun.l.google.com:19302';
   const turnUrl = process.env.TURN_URL;
   const sharedSecret = process.env.TURN_SHARED_SECRET;

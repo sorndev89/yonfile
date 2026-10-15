@@ -4,13 +4,15 @@ import 'dart:typed_data';
 class PickedFile {
   final String name;
   final int size;
-  final Uint8List bytes;
+  final Uint8List? bytes;
+  final Stream<List<int>>? readStream;
   final String mimeType;
 
   const PickedFile({
     required this.name,
     required this.size,
-    required this.bytes,
+    this.bytes,
+    this.readStream,
     this.mimeType = 'application/octet-stream',
-  });
+  }) : assert(bytes != null || readStream != null);
 }

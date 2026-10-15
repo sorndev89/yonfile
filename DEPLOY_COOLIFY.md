@@ -96,12 +96,15 @@ https://yonfile.example.com
 | `TURN_URL` | `turn:turn.yonfile.example.com:3478` | TURN server (ຖ້າມີ) |
 | `TURN_SHARED_SECRET` | `<random-long-secret>` | Secret ສຳລັບອອກ credentials (HMAC) — ຕ້ອງຕົງກັບ Coturn |
 | `TURN_REALM` | `turn.yonfile.example.com` | Realm ຂອງ Coturn |
+| `TRUST_PROXY` | `true` | ເປີດສະເພາະເມື່ອ reverse proxy ຂຽນທັບ forwarded IP headers ຈາກ client |
+| `ALLOWED_ORIGINS` | `https://yonfile.example.com` | Origin ເພີ່ມເຕີມສຳລັບ browser ທີ່ຢູ່ຄົນລະ host; ຄັ່ນຫຼາຍ origin ດ້ວຍ comma |
 
 > - ຖ້າ**ຍັງບໍ່ມີ TURN**, ປ່ອຍ `TURN_URL` / `TURN_SHARED_SECRET` ຫວ່າງໄດ້.
 >   ລະບົບຈະໃຊ້ STUN ເທົ່ານັ້ນ (ພຽງພໍ LAN 100% ແລະ ຂ້າມເນັດທົ່ວໄປ ~80%).
 > - ສ້າງ secret ທີ່ແຂງແຮງ: `openssl rand -hex 32`.
 > - **ຢ່າ** ໃສ່ `TURN_SHARED_SECRET` ລົງໃນ browser build — server ຈະອອກ
 >   credentials ຊົ່ວຄາວ (10 ນາທີ) ຜ່ານ `/api/ice-servers` ໃຫ້ເອງ.
+> - ຖ້າໃຊ້ proxy, ຕ້ອງກວດວ່າມັນລຶບຄ່າ `X-Forwarded-For` ເກົ່າຈາກ request ຂາເຂົ້າ ແລະກຳນົດຄ່າໃໝ່ຈາກ IP ທີ່ມັນເຫັນ ກ່ອນເປີດ `TRUST_PROXY=true`.
 
 ---
 

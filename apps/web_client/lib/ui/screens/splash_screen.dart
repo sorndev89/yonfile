@@ -29,14 +29,15 @@ class YonFileSplashScreen extends StatelessWidget {
                 fit: BoxFit.contain,
               ),
               const SizedBox(height: 22),
+              // Use the same Noto Sans Lao Loop family as the app theme.
               RichText(
-                text: const TextSpan(
-                  style: TextStyle(
+                text: TextSpan(
+                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
                     fontSize: 32,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.8,
                   ),
-                  children: [
+                  children: const [
                     TextSpan(
                       text: 'Yon',
                       style: TextStyle(color: Colors.white),
@@ -49,10 +50,13 @@ class YonFileSplashScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 9),
-              const Text(
+              Text(
                 'ສົ່ງໄຟລ໌ລະຫວ່າງອຸປະກອນ ງ່າຍ ແລະ ໄວ',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Color(0xFFAFBBD0), fontSize: 13),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFFAFBBD0),
+                  fontSize: 13,
+                ),
               ),
               const SizedBox(height: 34),
               const SizedBox(

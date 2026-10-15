@@ -14,6 +14,7 @@ import '../../models/file_transfer_state.dart';
 import '../../models/peer_device.dart';
 import '../../models/picked_file.dart';
 import '../../services/local_signaling_host.dart';
+import '../../services/file_picker_options.dart';
 import '../../services/signaling_service.dart';
 import '../../services/webrtc_service.dart';
 import '../widgets/home_header.dart';
@@ -54,18 +55,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final Map<String, PeerDevice> _lanPeers = {};
   final Map<String, PeerDevice> _pinPeers = {};
+  final Map<String, Future<void>> _pinConnectionAttempts = {};
 
   String _myName = 'ອຸປະກອນຂອງຂ້ອຍ';
   PeerDeviceType _myDeviceType = PeerDeviceType.desktop;
   bool _deviceTypeResolved = false;
   bool _localHostRunning = false;
   bool _usingLocalSignaling = false;
+  List<String> _localHostAddresses = const [];
 
   String _ownPin = _randomPin();
   String? _joinedPin;
 
   final Set<String> _connectedPeerIds = {};
-  final Set<String> _connectingPeerIds = {};
   final Set<String> _knownCompletedTransfers = {};
   String? _activePeerId;
   bool _transferSheetOpen = false;
@@ -316,28 +318,32 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     try {
-      final files = await FilePicker.pickFiles();
+      final files = await FilePicker.pickFiles(
+        webOptions: lazyFilePickerOptions,
+      );
       if (files.isEmpty) return;
       final picked = <PickedFile>[];
       var totalBytes = 0;
       for (final f in files) {
-        final knownSize = await f.length();
-        if (knownSize != null &&
-            totalBytes + knownSize > AppConfig.maxFileSizeBytes) {
+        final size = f.lengthSync() ?? await f.length();
+        if (size == null || size < 0) {
+          _snack('ອ່ານຂະໜາດໄຟລ໌ ${f.name} ບໍ່ໄດ້');
+          return;
+        }
+        if (totalBytes + size > AppConfig.maxFileSizeBytes) {
           _snack('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ 512 MB');
           return;
         }
-        final bytes = await f.readAsBytes();
-        if (totalBytes + bytes.length > AppConfig.maxFileSizeBytes) {
+        if (size > AppConfig.maxFileSizeBytes) {
           _snack('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ 512 MB');
           return;
         }
-        totalBytes += bytes.length;
+        totalBytes += size;
         picked.add(
           PickedFile(
             name: f.name,
-            size: bytes.length,
-            bytes: bytes,
+            size: size,
+            readStream: f.readAsByteStream(),
             mimeType: _guessMime(f.name),
           ),
         );
@@ -438,16 +444,35 @@ class _HomeScreenState extends State<HomeScreen> {
       return false;
     }
 
+    final previousJoinedPin = _joinedPin;
+    final previousSignalingPin = previousJoinedPin ?? _ownPin;
     _joinPin(pin);
     final deadline = DateTime.now().add(const Duration(seconds: 10));
     while (mounted && DateTime.now().isBefore(deadline)) {
-      if (_ownPin == pin && _pinPeers.containsKey(peer.id)) {
+      if (_joinedPin == pin && _pinPeers.containsKey(peer.id)) {
         _snack('PIN ຖືກຕ້ອງ ແລະ ${peer.name} ຢູ່ໃນຫ້ອງນີ້');
+        return true;
+      }
+      // A peer may already have completed WebRTC while its room-list update
+      // is delayed. The open data channel is authoritative in that case.
+      if (_webrtc.isOpen(peer.id)) {
+        _setActiveConnectedPeer(peer.id);
+        _snack('ເຊື່ອມຕໍ່ ${peer.name} ສຳເລັດແລ້ວ');
         return true;
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
+    if (mounted && _webrtc.isOpen(peer.id)) {
+      _setActiveConnectedPeer(peer.id);
+      _snack('ເຊື່ອມຕໍ່ ${peer.name} ສຳເລັດແລ້ວ');
+      return true;
+    }
     if (mounted) {
+      _signaling.joinPin(previousSignalingPin);
+      setState(() {
+        _joinedPin = previousJoinedPin;
+        _pinPeers.clear();
+      });
       _snack('PIN ບໍ່ຖືກຕ້ອງ ຫຼື ${peer.name} ບໍ່ໄດ້ເຂົ້າຫ້ອງ PIN ນີ້');
     }
     return false;
@@ -459,27 +484,49 @@ class _HomeScreenState extends State<HomeScreen> {
     _signaling.joinPin(pin);
     setState(() {
       _joinedPin = pin;
-      _ownPin = pin;
       _pinPeers.clear();
     });
     _snack('ກຳລັງເຂົ້າຫ້ອງ PIN');
   }
 
   Future<void> _connectToPinPeer(PeerDevice peer) async {
-    if (!_connectingPeerIds.add(peer.id)) return;
+    final ongoing = _pinConnectionAttempts[peer.id];
+    if (ongoing != null) {
+      await ongoing;
+      return;
+    }
+
+    final attempt = _openPinPeer(peer);
+    _pinConnectionAttempts[peer.id] = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (identical(_pinConnectionAttempts[peer.id], attempt)) {
+        _pinConnectionAttempts.remove(peer.id);
+      }
+    }
+  }
+
+  Future<void> _openPinPeer(PeerDevice peer) async {
     try {
       if (!_webrtc.isOpen(peer.id)) {
         await _webrtc.connect(peer.id);
         await _webrtc.waitUntilOpen(peer.id);
       }
       if (!mounted || !_webrtc.isOpen(peer.id)) return;
-      setState(() => _activePeerId = peer.id);
+      _setActiveConnectedPeer(peer.id);
     } catch (error) {
       debugPrint('PIN peer connection failed (${peer.id}): $error');
       if (mounted) _snack('ເຊື່ອມຕໍ່ ${peer.name} ບໍ່ສຳເລັດ ກະລຸນາລອງໃໝ່');
-    } finally {
-      _connectingPeerIds.remove(peer.id);
     }
+  }
+
+  void _setActiveConnectedPeer(String peerId) {
+    if (!mounted) return;
+    setState(() {
+      _connectedPeerIds.add(peerId);
+      _activePeerId = peerId;
+    });
   }
 
   void _leavePin() {
@@ -532,6 +579,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _sendTextMessage(PeerDevice peer) async {
+    if (!await _ensurePinAccess(peer)) return;
     try {
       if (!_webrtc.isOpen(peer.id)) {
         await _webrtc.connect(peer.id);
@@ -707,14 +755,82 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showOfflineOptions() async {
+    final signalingLabel = switch (_status) {
+      SignalingStatus.connected => 'Signaling: ເຊື່ອມຕໍ່ແລ້ວ',
+      SignalingStatus.connecting => 'Signaling: ກຳລັງເຊື່ອມຕໍ່',
+      SignalingStatus.disconnected => 'Signaling: ຂາດການເຊື່ອມຕໍ່',
+    };
+    final signalingColor = switch (_status) {
+      SignalingStatus.connected => YonTheme.emeraldGreen,
+      SignalingStatus.connecting => YonTheme.amberGold,
+      SignalingStatus.disconnected => YonTheme.roseRed,
+    };
     final action = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('ໃຊ້ງານ offline ໃນ LAN'),
-        content: Text(
-          _localHostRunning
-              ? 'ກຳລັງເປີດ local host. ໃຫ້ອຸປະກອນອື່ນເຊື່ອມຕໍ່ IP ເຄື່ອງນີ້ທີ່ພອດ 3001.'
-              : 'ຕໍ່ອຸປະກອນໃນ Wi-Fi/LAN ດຽວກັນໄດ້ ເຖິງແມ່ນບໍ່ມີ Internet ຫຼື server ກາງ.',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: kIsWeb
+                      ? YonTheme.amberGold.withValues(alpha: 0.45)
+                      : YonTheme.emeraldGreen.withValues(alpha: 0.4),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    kIsWeb ? Icons.language_rounded : Icons.devices_rounded,
+                    color: kIsWeb ? YonTheme.amberGold : YonTheme.emeraldGreen,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          kIsWeb ? 'Web App' : 'YonFile App',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          kIsWeb
+                              ? 'Browser ບໍ່ສາມາດເປີດ LAN host ໄດ້'
+                              : _localHostRunning
+                              ? 'Host ກຳລັງເປີດ: ${_localHostAddresses.map((ip) => '$ip:3001').join(', ')}'
+                              : _usingLocalSignaling
+                              ? 'ກຳລັງໃຊ້ Offline LAN host'
+                              : 'ກຳລັງໃຊ້ Online signaling',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          signalingLabel,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: signalingColor),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              kIsWeb
+                  ? 'ໃຫ້ເປີດ YonFile App ໃນ Android, macOS ຫຼື Windows ເພື່ອເປັນ host; Web ສາມາດເຂົ້າຫາ host ໃນ LAN ໄດ້ຕາມສິດຂອງ browser.'
+                  : 'ອຸປະກອນທີ່ເຂົ້າຫາ host ຕ້ອງຢູ່ໃນ Wi-Fi/LAN ດຽວກັນ.',
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -733,7 +849,11 @@ class _HomeScreenState extends State<HomeScreen> {
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, 'host'),
             child: Text(
-              _localHostRunning ? 'ສະແດງ IP' : 'ເປີດ host ໃນເຄື່ອງນີ້',
+              _localHostRunning
+                  ? 'ສະແດງ IP'
+                  : kIsWeb
+                  ? 'ກວດສອບການເປີດ host'
+                  : 'ເປີດ host ໃນເຄື່ອງນີ້',
             ),
           ),
         ],
@@ -750,6 +870,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _startLocalHost() async {
+    if (kIsWeb) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Web ເປີດ host ບໍ່ໄດ້'),
+          content: const Text(
+            'ຕອນນີ້ທ່ານໃຊ້ YonFile ຜ່ານ browser. Browser ບໍ່ສາມາດເປີດ WebSocket server ໃນເຄື່ອງໄດ້. ໃຫ້ໃຊ້ YonFile App ເປັນ host ແລ້ວເຂົ້າຫາຜ່ານ IP.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('ເຂົ້າໃຈແລ້ວ'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
     try {
       final addresses = await _localHost.start();
       if (!mounted) return;
@@ -763,9 +901,10 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _localHostRunning = true;
         _usingLocalSignaling = true;
+        _localHostAddresses = addresses;
       });
       _snack(
-        'Offline host ພ້ອມແລ້ວ: '
+        '${_status == SignalingStatus.connected ? 'Offline host ພ້ອມແລ້ວ' : 'Offline host ກຳລັງເຊື່ອມ signaling'}: '
         '${addresses.map((address) => '$address:3001').join(', ')}',
       );
     } catch (error) {
@@ -774,6 +913,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _joinLocalHost() async {
+    if (kIsWeb && Uri.base.scheme == 'https') {
+      _snack(
+        'Browser ເທິງ HTTPS ບໍ່ສາມາດເຂົ້າ offline host ws:// ໄດ້. ໃຫ້ໃຊ້ YonFile App ຫຼື web ຜ່ານ HTTP ໃນ LAN',
+      );
+      return;
+    }
     final controller = TextEditingController();
     final address = await showDialog<String>(
       context: context,
@@ -825,6 +970,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _localHostRunning = false;
       _usingLocalSignaling = false;
+      _localHostAddresses = const [];
     });
   }
 
