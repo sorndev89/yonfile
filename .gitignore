@@ -1,0 +1,25 @@
+# Node
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+*.log
+
+# Flutter / Dart
+**/.dart_tool/
+**/build/
+apps/web_client/.flutter-plugins
+apps/web_client/.flutter-plugins-dependencies
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Docker
+**/.docker/

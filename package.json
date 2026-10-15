@@ -1,0 +1,24 @@
+{
+  "name": "yonfile-monorepo",
+  "version": "1.0.0",
+  "packageManager": "pnpm@9.15.9",
+  "private": true,
+  "description": "ໂຍນໄຟລ໌ (YonFile) - Cross-platform P2P File Transfer",
+  "scripts": {
+    "dev:server": "pnpm --filter @yonfile/server dev",
+    "build:server": "pnpm --filter @yonfile/server build",
+    "start:server": "pnpm --filter @yonfile/server start",
+    "test:server": "pnpm --filter @yonfile/server test",
+    "dev:web": "cd apps/web_client && flutter run -d chrome --web-port 8080",
+    "build:web": "cd apps/web_client && flutter build web --release --wasm",
+    "build:apk": "cd apps/web_client && flutter build apk --release --dart-define=SIGNALING_URL=${SIGNALING_URL:-wss://yonfile.example/ws}",
+    "build:appbundle": "cd apps/web_client && flutter build appbundle --release --dart-define=SIGNALING_URL=${SIGNALING_URL:-wss://yonfile.example/ws}",
+    "build:macos": "cd apps/web_client && flutter build macos --release --dart-define=SIGNALING_URL=${SIGNALING_URL:-wss://yonfile.example/ws}",
+    "test:web": "cd apps/web_client && flutter test",
+    "analyze:web": "cd apps/web_client && flutter analyze"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

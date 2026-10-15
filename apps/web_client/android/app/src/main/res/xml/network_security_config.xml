@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  YonFile — Android Network Security Config
+  ອະນຸຍາດ cleartext (ws:// / http://) ເພື່ອໃຫ້ຕິດຕໍ່ Signaling Server ທີ່ເປັນ IP LAN
+  (ເຊັ່ນ ws://192.168.1.10:3000/ws). ຖ້າໃຊ້ wss:// ຜ່ານໂດເມນ HTTPS ສາມາດຕັ້ງ
+  cleartextTrafficPermitted="false" ໄດ້.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

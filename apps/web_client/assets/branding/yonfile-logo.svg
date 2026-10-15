@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 88" role="img" aria-labelledby="title">
+  <title id="title">YonFile</title>
+  <g transform="translate(8 10)">
+    <path d="M16 4h33l18 18v43a7 7 0 0 1-7 7H16a7 7 0 0 1-7-7V11a7 7 0 0 1 7-7Z" fill="#ff7900"/>
+    <path d="M49 4v14a4 4 0 0 0 4 4h14" fill="#ffc45d"/>
+    <path d="M18 29h24v-6l11 10-11 10v-6H18v-8Zm36 22H30v6L19 47l11-10v6h24v8Z" fill="#10192d"/>
+  </g>
+  <text x="94" y="59" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="#10192d">Yon</text>
+  <text x="174" y="59" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="#ff6a00">File</text>
+</svg>

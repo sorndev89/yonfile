@@ -1,0 +1,45 @@
+# =============================================================================
+# YonFile — local / self-hosted stack (Coolify-compatible)
+# ໃຊ້: docker compose up -d --build
+# =============================================================================
+services:
+  yonfile:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yonfile:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      STUN_URL: ${STUN_URL:-stun:stun.l.google.com:19302}
+      TURN_URL: ${TURN_URL:-}
+      TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # TURN server ສຳລັບທະລຸ Symmetric NAT (4G/5G).
+  # ຕ້ອງເປີດ UDP 3478 ແລະ relay range 49152-65535 ຢູ່ firewall.
+  coturn:
+    profiles: ["turn"]
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
+      TURN_REALM: ${TURN_REALM:-yonfile.local}
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        test -n "$$TURN_SHARED_SECRET" || { echo 'TURN_SHARED_SECRET must be set' >&2; exit 1; }
+        exec turnserver --no-cli --log-file=stdout --listening-port=3478 \
+          --fingerprint --use-auth-secret --static-auth-secret="$$TURN_SHARED_SECRET" \
+          --realm="$$TURN_REALM" --min-port=49152 --max-port=65535 \
+          --no-multicast-peers
