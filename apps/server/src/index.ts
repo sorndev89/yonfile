@@ -60,8 +60,24 @@ wss.on('connection', (ws, req) => {
           msg.deviceType === 'desktop'
             ? msg.deviceType
             : 'desktop';
+        const operatingSystem =
+          msg.operatingSystem === 'android' ||
+          msg.operatingSystem === 'ios' ||
+          msg.operatingSystem === 'macos' ||
+          msg.operatingSystem === 'windows' ||
+          msg.operatingSystem === 'linux' ||
+          msg.operatingSystem === 'web' ||
+          msg.operatingSystem === 'unknown'
+            ? msg.operatingSystem
+            : 'unknown';
         const name = typeof msg.name === 'string' ? msg.name : undefined;
-        const peer = rooms.register(ws, clientIp, name, deviceType);
+        const peer = rooms.register(
+          ws,
+          clientIp,
+          name,
+          deviceType,
+          operatingSystem,
+        );
         peerId = peer.id;
         ws.send(
           JSON.stringify({ type: 'registered', peerId: peer.id, ip: clientIp }),

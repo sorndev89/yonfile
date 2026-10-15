@@ -41,7 +41,10 @@ class LocalSignalingHost {
             }
             peer!
               ..name = _cleanName(message['name'] as String?)
-              ..deviceType = _cleanDeviceType(message['deviceType'] as String?);
+              ..deviceType = _cleanDeviceType(message['deviceType'] as String?)
+              ..operatingSystem = _cleanOperatingSystem(
+                message['operatingSystem'] as String?,
+              );
             _send(peer!, {
               'type': 'registered',
               'peerId': peer!.id,
@@ -68,6 +71,11 @@ class LocalSignalingHost {
         peer.name = _cleanName(message['name'] as String?);
         if (message['deviceType'] is String) {
           peer.deviceType = _cleanDeviceType(message['deviceType'] as String?);
+        }
+        if (message['operatingSystem'] is String) {
+          peer.operatingSystem = _cleanOperatingSystem(
+            message['operatingSystem'] as String?,
+          );
         }
         _broadcastLan();
         if (peer.pin != null) _broadcastPin(peer.pin!);
@@ -133,6 +141,7 @@ class LocalSignalingHost {
               'id': peer.id,
               'name': peer.name,
               'deviceType': peer.deviceType,
+              'operatingSystem': peer.operatingSystem,
               'scope': scope,
             },
           )
@@ -172,6 +181,18 @@ class LocalSignalingHost {
   String _cleanDeviceType(String? type) =>
       const {'mobile', 'tablet', 'desktop'}.contains(type) ? type! : 'desktop';
 
+  String _cleanOperatingSystem(String? system) =>
+      const {
+        'android',
+        'ios',
+        'macos',
+        'windows',
+        'linux',
+        'web',
+      }.contains(system)
+      ? system!
+      : 'unknown';
+
   void _send(_LocalPeer peer, Map<String, dynamic> message) =>
       _sendRaw(peer.socket, message);
 
@@ -195,5 +216,6 @@ class _LocalPeer {
   final WebSocket socket;
   String name = 'ອຸປະກອນ YonFile';
   String deviceType = 'desktop';
+  String operatingSystem = 'unknown';
   String? pin;
 }

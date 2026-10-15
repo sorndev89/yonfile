@@ -6,6 +6,7 @@ import '../../models/incoming_file_offer.dart';
 import '../../models/peer_device.dart';
 import '../widgets/transfer_sheet.dart';
 import '../widgets/transfer_history_card.dart';
+import '../widgets/peer_os_badge.dart';
 
 /// Active peer session UI: connected devices, pending offers and transfers.
 class ConnectionScreen extends StatelessWidget {
@@ -42,7 +43,7 @@ class ConnectionScreen extends StatelessWidget {
     final activeTransfer = transfers.where((transfer) => transfer.isActive);
     final activeTransfers = activeTransfer.toList(growable: false);
     final label = activeTransfer.isEmpty
-        ? 'ເຊື່ອມຕໍ່ແລ້ວ · ພ້ອມສົ່ງໄຟລ໌'
+        ? 'ເຊື່ອມຕໍ່ສຳເລັດ · ພ້ອມໂອນໄຟລ໌'
         : activeTransfer.first.status == TransferStatus.offering
         ? 'ມີໄຟລ໌ລໍຖ້າການຮັບ'
         : 'ກຳລັງໂອນຂໍ້ມູນ';
@@ -236,6 +237,8 @@ class _ConnectionDevice extends StatelessWidget {
                 : Colors.black54,
           ),
         ),
+        const SizedBox(height: 3),
+        PeerOsBadge(peer: peer),
       ],
     );
   }

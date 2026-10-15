@@ -1,6 +1,14 @@
 import type { WebSocket } from 'ws';
 
 export type DeviceType = 'mobile' | 'tablet' | 'desktop';
+export type OperatingSystem =
+  | 'android'
+  | 'ios'
+  | 'macos'
+  | 'windows'
+  | 'linux'
+  | 'web'
+  | 'unknown';
 
 export type PeerScope = 'lan' | 'pin';
 
@@ -9,6 +17,7 @@ export interface Peer {
   id: string;
   name: string;
   deviceType: DeviceType;
+  operatingSystem: OperatingSystem;
   /** Public IP ທີ່ດຶງຈາກ Reverse Proxy ໃຊ້ຈັດກຸ່ມ LAN */
   ip: string;
   /** ລະຫັດຫ້ອງ 6 ຕົວເລກ ສຳລັບໂຍນຂ້າມເຄືອຂ່າຍ */
@@ -21,6 +30,7 @@ export interface SerializedPeer {
   id: string;
   name: string;
   deviceType: DeviceType;
+  operatingSystem: OperatingSystem;
   scope: PeerScope;
 }
 
@@ -30,6 +40,7 @@ export interface RegisterMessage {
   type: 'register';
   name?: string;
   deviceType?: DeviceType;
+  operatingSystem?: OperatingSystem;
 }
 
 export interface UpdateNameMessage {

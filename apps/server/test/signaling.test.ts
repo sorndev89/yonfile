@@ -125,7 +125,12 @@ test('two peers on same IP see each other (LAN scope)', async () => {
   const a = await connect();
   const b = await connect();
   try {
-    send(a, { type: 'register', name: 'A', deviceType: 'mobile' });
+    send(a, {
+      type: 'register',
+      name: 'A',
+      deviceType: 'mobile',
+      operatingSystem: 'android',
+    });
     const aId = (await waitFor(a, (m) => m.type === 'registered')).peerId;
 
     let bId: string | undefined;
@@ -133,13 +138,26 @@ test('two peers on same IP see each other (LAN scope)', async () => {
       a,
       (m) => m.type === 'peers-updated',
     );
-    send(b, { type: 'register', name: 'B', deviceType: 'desktop' });
+    send(b, {
+      type: 'register',
+      name: 'B',
+      deviceType: 'desktop',
+      operatingSystem: 'macos',
+    });
     bId = (await waitFor(b, (m) => m.type === 'registered')).peerId;
     const update = await updatePromise;
     assert.equal(update.scope, 'lan');
     const ids = update.peers.map((p: any) => p.id);
     assert.ok(ids.includes(aId));
     assert.ok(ids.includes(bId));
+    assert.equal(
+      update.peers.find((peer: any) => peer.id === aId).operatingSystem,
+      'android',
+    );
+    assert.equal(
+      update.peers.find((peer: any) => peer.id === bId).operatingSystem,
+      'macos',
+    );
   } finally {
     a.close();
     b.close();

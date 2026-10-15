@@ -18,6 +18,7 @@ import '../../services/signaling_service.dart';
 import '../../services/webrtc_service.dart';
 import '../widgets/home_header.dart';
 import '../widgets/pin_room_card.dart';
+import '../widgets/peer_os_badge.dart';
 import '../widgets/transfer_sheet.dart';
 import '../widgets/transfer_history_card.dart';
 import '../widgets/transfer_status_panel.dart';
@@ -92,7 +93,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _myName = saved);
     }
     // Cache the saved name even if the WebSocket has not registered yet.
-    _signaling.register(_myName, _myDeviceType);
+    _signaling.register(_myName, _myDeviceType, _myOperatingSystem);
   }
 
   @override
@@ -101,23 +102,30 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_deviceTypeResolved) return;
     _deviceTypeResolved = true;
     _myDeviceType = _detectDeviceType();
-    _signaling.register(_myName, _myDeviceType);
+    _signaling.register(_myName, _myDeviceType, _myOperatingSystem);
   }
 
   PeerDeviceType _detectDeviceType() {
     final size = MediaQuery.sizeOf(context);
-    if (kIsWeb ||
-        defaultTargetPlatform == TargetPlatform.macOS ||
-        defaultTargetPlatform == TargetPlatform.windows ||
-        defaultTargetPlatform == TargetPlatform.linux) {
-      if (size.width < 600) return PeerDeviceType.mobile;
-      if (size.width < 1100) return PeerDeviceType.tablet;
-      return PeerDeviceType.desktop;
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return size.shortestSide < 600
+            ? PeerDeviceType.mobile
+            : PeerDeviceType.tablet;
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+        return PeerDeviceType.desktop;
+      case TargetPlatform.fuchsia:
+        if (size.width < 600) return PeerDeviceType.mobile;
+        if (size.width < 1100) return PeerDeviceType.tablet;
+        return PeerDeviceType.desktop;
     }
-    return size.shortestSide < 600
-        ? PeerDeviceType.mobile
-        : PeerDeviceType.tablet;
   }
+
+  PeerOperatingSystem get _myOperatingSystem =>
+      PeerDevice.fromTargetPlatform(defaultTargetPlatform);
 
   void _bindStreams() {
     _subs.add(
@@ -268,6 +276,7 @@ class _HomeScreenState extends State<HomeScreen> {
     id: _peerId ?? 'self',
     name: _myName,
     deviceType: _myDeviceType,
+    operatingSystem: _myOperatingSystem,
     scope: PeerScope.lan,
   );
 
@@ -284,6 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
       id: id,
       name: 'YonFile',
       deviceType: PeerDeviceType.desktop,
+      operatingSystem: PeerOperatingSystem.unknown,
       scope: PeerScope.lan,
     );
   }
@@ -296,7 +306,15 @@ class _HomeScreenState extends State<HomeScreen> {
   /* --------------------------- File sending ---------------------------- */
 
   Future<void> _pickAndSend(PeerDevice peer) async {
+    final pinWasAlreadyJoined =
+        peer.scope == PeerScope.pin || _pinPeers.containsKey(peer.id);
     if (!await _ensurePinAccess(peer)) return;
+    if (!pinWasAlreadyJoined) {
+      // First PIN entry establishes the connection. Let the user review the
+      // connected-device screen before choosing any files to send.
+      await _connectToPinPeer(peer);
+      return;
+    }
     try {
       final files = await FilePicker.pickFiles();
       if (files.isEmpty) return;
@@ -610,10 +628,31 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     Icon(peer.icon, color: YonTheme.yonOrange),
                     const SizedBox(width: 10),
-                    Expanded(child: Text(peer.name)),
-                    Text(
-                      peer.typeLabel,
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            peer.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              Text(
+                                peer.typeLabel,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              PeerOsBadge(peer: peer, compact: true),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),

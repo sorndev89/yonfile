@@ -19,8 +19,22 @@ void main() {
     final secondMessages = StreamIterator<dynamic>(second);
 
     try {
-      first.add(jsonEncode({'type': 'register', 'name': 'Mac'}));
-      second.add(jsonEncode({'type': 'register', 'name': 'Android'}));
+      first.add(
+        jsonEncode({
+          'type': 'register',
+          'name': 'Mac',
+          'deviceType': 'desktop',
+          'operatingSystem': 'macos',
+        }),
+      );
+      second.add(
+        jsonEncode({
+          'type': 'register',
+          'name': 'Android',
+          'deviceType': 'mobile',
+          'operatingSystem': 'android',
+        }),
+      );
       final firstId = (await _nextMessage(
         firstMessages,
         'registered',
@@ -39,6 +53,18 @@ void main() {
       );
       expect(room['scope'], 'pin');
       expect((room['peers'] as List).length, 2);
+      expect(
+        (room['peers'] as List).firstWhere(
+          (peer) => peer['id'] == firstId,
+        )['operatingSystem'],
+        'macos',
+      );
+      expect(
+        (room['peers'] as List).firstWhere(
+          (peer) => peer['id'] == secondId,
+        )['operatingSystem'],
+        'android',
+      );
 
       first.add(
         jsonEncode({

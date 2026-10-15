@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { WebSocket } from 'ws';
 import type {
   DeviceType,
+  OperatingSystem,
   Peer,
   PeerScope,
   SerializedPeer,
@@ -27,11 +28,13 @@ export class RoomManager {
     ip: string,
     name?: string,
     deviceType?: DeviceType,
+    operatingSystem?: OperatingSystem,
   ): Peer {
     const existing = [...this.peers.values()].find((peer) => peer.ws === ws);
     if (existing) {
       existing.name = name?.trim().slice(0, 60) || existing.name;
       if (deviceType) existing.deviceType = deviceType;
+      if (operatingSystem) existing.operatingSystem = operatingSystem;
       return existing;
     }
     const id = crypto.randomUUID();
@@ -39,6 +42,7 @@ export class RoomManager {
       id,
       name: name?.trim().slice(0, 60) || 'ອຸປະກອນ YonFile',
       deviceType: deviceType ?? 'desktop',
+      operatingSystem: operatingSystem ?? 'unknown',
       ip,
       pinRoom: null,
       ws,
@@ -89,10 +93,11 @@ export class RoomManager {
   }
 
   private static serialize(group: Peer[], scope: PeerScope): SerializedPeer[] {
-    return group.map(({ id, name, deviceType }) => ({
+    return group.map(({ id, name, deviceType, operatingSystem }) => ({
       id,
       name,
       deviceType,
+      operatingSystem,
       scope,
     }));
   }

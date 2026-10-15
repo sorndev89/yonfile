@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/yon_theme.dart';
 import '../../models/peer_device.dart';
 import '../../models/picked_file.dart';
+import 'peer_os_badge.dart';
 
 /// ປຸ່ມອຸປະກອນປາຍທາງ + DragTarget ຮັບໄຟລ໌.
 class PeerAvatar extends StatefulWidget {
@@ -133,6 +134,8 @@ class _PeerAvatarState extends State<PeerAvatar> {
               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
             ),
           ),
+          const SizedBox(height: 2),
+          PeerOsBadge(peer: widget.peer, compact: true),
           if (widget.isSelf)
             const Padding(
               padding: EdgeInsets.only(top: 2),

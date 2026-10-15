@@ -47,6 +47,7 @@ class SignalingService {
 
   String _name = 'ອຸປະກອນ YonFile';
   PeerDeviceType _deviceType = PeerDeviceType.desktop;
+  PeerOperatingSystem _operatingSystem = PeerOperatingSystem.unknown;
   String? _joinedPin;
   bool _pendingNameUpdate = false;
 
@@ -101,6 +102,7 @@ class SignalingService {
         'type': 'register',
         'name': _name,
         'deviceType': _deviceType.name,
+        'operatingSystem': _operatingSystem.name,
       });
     } catch (error) {
       debugPrint('Signaling connect failed: $error');
@@ -200,14 +202,20 @@ class SignalingService {
     }
   }
 
-  void register(String name, PeerDeviceType deviceType) {
+  void register(
+    String name,
+    PeerDeviceType deviceType, [
+    PeerOperatingSystem operatingSystem = PeerOperatingSystem.unknown,
+  ]) {
     _name = name.trim().isEmpty ? 'ອຸປະກອນ YonFile' : name.trim();
     _deviceType = deviceType;
+    _operatingSystem = operatingSystem;
     if (isConnected) {
       _send({
         'type': 'register',
         'name': _name,
         'deviceType': _deviceType.name,
+        'operatingSystem': _operatingSystem.name,
       });
       _pendingNameUpdate = false;
     } else {
