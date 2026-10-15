@@ -12,6 +12,7 @@ class PinRoomCard extends StatefulWidget {
     required this.joinedPin,
     required this.onJoinPin,
     required this.onLeavePin,
+    required this.onChangePin,
     required this.onScan,
   });
 
@@ -19,6 +20,7 @@ class PinRoomCard extends StatefulWidget {
   final String? joinedPin;
   final ValueChanged<String> onJoinPin;
   final VoidCallback onLeavePin;
+  final VoidCallback onChangePin;
   final VoidCallback onScan;
 
   @override
@@ -60,13 +62,17 @@ class _PinRoomCardState extends State<PinRoomCard> {
         children: [
           Row(
             children: [
-              const Icon(Icons.public_rounded, color: YonTheme.yonOrange, size: 20),
+              const Icon(
+                Icons.public_rounded,
+                color: YonTheme.yonOrange,
+                size: 20,
+              ),
               const SizedBox(width: 8),
               Text(
                 'ໂຍນຂ້າມເຄືອຂ່າຍ (PIN)',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
             ],
           ),
@@ -83,8 +89,10 @@ class _PinRoomCardState extends State<PinRoomCard> {
             children: [
               Expanded(
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     gradient: YonTheme.primaryGradient,
                     borderRadius: BorderRadius.circular(14),
@@ -114,6 +122,14 @@ class _PinRoomCardState extends State<PinRoomCard> {
                 icon: const Icon(Icons.copy_rounded),
               ),
             ],
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: widget.onChangePin,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('ປ່ຽນ PIN ໃໝ່'),
+            ),
           ),
           const SizedBox(height: 12),
           Row(
@@ -176,9 +192,7 @@ class _PinRoomCardState extends State<PinRoomCard> {
                   controller: _controller,
                   keyboardType: TextInputType.number,
                   maxLength: 6,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                  ],
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   decoration: const InputDecoration(
                     hintText: 'ເຊັ່ນ 123456',
                     counterText: '',
@@ -190,7 +204,10 @@ class _PinRoomCardState extends State<PinRoomCard> {
               ElevatedButton(
                 onPressed: _join,
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 14,
+                  ),
                 ),
                 child: const Text('ເຊື່ອມຕໍ່'),
               ),
@@ -200,8 +217,11 @@ class _PinRoomCardState extends State<PinRoomCard> {
             const SizedBox(height: 16),
             Row(
               children: [
-                const Icon(Icons.check_circle_rounded,
-                    color: YonTheme.emeraldGreen, size: 18),
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: YonTheme.emeraldGreen,
+                  size: 18,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -230,9 +250,9 @@ class _PinRoomCardState extends State<PinRoomCard> {
   void _join() {
     final pin = _controller.text.trim();
     if (pin.length != 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ກະລຸນາໃສ່ລະຫັດ 6 ຕົວເລກ')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('ກະລຸນາໃສ່ລະຫັດ 6 ຕົວເລກ')));
       return;
     }
     widget.onJoinPin(pin);

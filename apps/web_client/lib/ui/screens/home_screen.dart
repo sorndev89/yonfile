@@ -63,6 +63,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _joinedPin;
 
   final Set<String> _connectedPeerIds = {};
+  final Set<String> _connectingPeerIds = {};
   final Set<String> _knownCompletedTransfers = {};
   String? _activePeerId;
   bool _transferSheetOpen = false;
@@ -174,6 +175,11 @@ class _HomeScreenState extends State<HomeScreen> {
               );
           }
         });
+        if (event.scope == PeerScope.pin &&
+            event.pin == _ownPin &&
+            event.peers.length == 1) {
+          unawaited(_connectToPinPeer(event.peers.single));
+        }
       }),
     );
 
@@ -267,7 +273,15 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final peer in _peers) {
       if (peer.id == id) return peer;
     }
-    return null;
+    // Keep the connection screen available if signaling removes the peer from
+    // its current room while the already-open data channel is still alive.
+    if (!_connectedPeerIds.contains(id)) return null;
+    return PeerDevice(
+      id: id,
+      name: 'YonFile',
+      deviceType: PeerDeviceType.desktop,
+      scope: PeerScope.lan,
+    );
   }
 
   /* --------------------------- File sending ---------------------------- */
@@ -424,7 +438,28 @@ class _HomeScreenState extends State<HomeScreen> {
     _snack('ກຳລັງເຂົ້າຫ້ອງ PIN');
   }
 
+  Future<void> _connectToPinPeer(PeerDevice peer) async {
+    if (!_connectingPeerIds.add(peer.id)) return;
+    try {
+      if (!_webrtc.isOpen(peer.id)) {
+        await _webrtc.connect(peer.id);
+        await _webrtc.waitUntilOpen(peer.id);
+      }
+      if (!mounted || !_webrtc.isOpen(peer.id)) return;
+      setState(() => _activePeerId = peer.id);
+    } catch (error) {
+      debugPrint('PIN peer connection failed (${peer.id}): $error');
+      if (mounted) _snack('ເຊື່ອມຕໍ່ ${peer.name} ບໍ່ສຳເລັດ ກະລຸນາລອງໃໝ່');
+    } finally {
+      _connectingPeerIds.remove(peer.id);
+    }
+  }
+
   void _leavePin() {
+    _changePin(showMessage: false);
+  }
+
+  void _changePin({bool showMessage = true}) {
     _signaling.leavePin();
     final nextPin = _randomPin();
     _signaling.joinPin(nextPin);
@@ -433,6 +468,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _pinPeers.clear();
       _ownPin = nextPin;
     });
+    if (showMessage) _snack('ປ່ຽນ PIN ໃໝ່ແລ້ວ');
   }
 
   Future<void> _editName() async {
@@ -825,6 +861,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         joinedPin: _joinedPin,
                         onJoinPin: _joinPin,
                         onLeavePin: _leavePin,
+                        onChangePin: _changePin,
                         onScan: _openScanner,
                       ),
                       const SizedBox(height: 16),
@@ -888,28 +925,37 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        decoration: BoxDecoration(
-          color: Theme.of(context).brightness == Brightness.dark
-              ? YonTheme.slateDarkBg
-              : YonTheme.lightBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: PinRoomCard(
-            ownPin: _ownPin,
-            joinedPin: _joinedPin,
-            onJoinPin: (pin) {
-              _joinPin(pin);
-              Navigator.pop(context);
-            },
-            onLeavePin: _leavePin,
-            onScan: () {
-              Navigator.pop(context);
-              _openScanner();
-            },
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => Container(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          decoration: BoxDecoration(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? YonTheme.slateDarkBg
+                : YonTheme.lightBg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: PinRoomCard(
+              ownPin: _ownPin,
+              joinedPin: _joinedPin,
+              onJoinPin: (pin) {
+                _joinPin(pin);
+                Navigator.pop(sheetContext);
+              },
+              onLeavePin: () {
+                _leavePin();
+                setSheetState(() {});
+              },
+              onChangePin: () {
+                _changePin();
+                setSheetState(() {});
+              },
+              onScan: () {
+                Navigator.pop(sheetContext);
+                _openScanner();
+              },
+            ),
           ),
         ),
       ),

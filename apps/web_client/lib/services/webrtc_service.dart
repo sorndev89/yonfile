@@ -209,6 +209,22 @@ class WebRtcService {
         _messageController.add(PeerMessage(session.peerId, message));
       }
     };
+
+    // A remote-created channel can already be open by the time it is bound.
+    // Publish its current state so the home screen can leave Radar immediately.
+    if (channel.state == RTCDataChannelState.RTCDataChannelOpen) {
+      if (!session.openCompleter.isCompleted) {
+        session.openCompleter.complete(channel);
+      }
+      if (!_stateController.isClosed) {
+        _stateController.add(
+          PeerChannelState(
+            session.peerId,
+            RTCDataChannelState.RTCDataChannelOpen,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _onSignal(SignalEvent event) async {
