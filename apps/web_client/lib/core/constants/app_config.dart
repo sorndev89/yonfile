@@ -39,8 +39,12 @@ class AppConfig {
       final base = _envSignalingUrl.isNotEmpty
           ? Uri.parse(_envSignalingUrl)
           : Uri.base;
+      final httpScheme = switch (base.scheme) {
+        'wss' || 'https' => 'https',
+        _ => 'http',
+      };
       final endpoint = base.replace(
-        scheme: base.scheme == 'https' ? 'https' : 'http',
+        scheme: httpScheme,
         path: '/api/ice-servers',
         query: null,
         fragment: null,
@@ -51,8 +55,28 @@ class AppConfig {
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body) as Map<String, dynamic>;
         final values = decoded['iceServers'] as List<dynamic>;
-        return values.cast<Map<String, dynamic>>();
+        final servers = values.cast<Map<String, dynamic>>();
+        final hasTurn = servers.any((server) {
+          final urls = server['urls'];
+          final values = urls is String
+              ? [urls]
+              : urls is List
+              ? urls.whereType<String>()
+              : const <String>[];
+          return values.any(
+            (url) => url.startsWith('turn:') || url.startsWith('turns:'),
+          );
+        });
+        debugPrint(
+          hasTurn
+              ? 'ICE configuration loaded with TURN relay.'
+              : 'ICE configuration has STUN only; cross-network connections may fail because TURN is not configured.',
+        );
+        return servers;
       }
+      debugPrint(
+        'Unable to load ICE server credentials: HTTP ${response.statusCode}',
+      );
     } catch (error) {
       debugPrint('Unable to load ICE server credentials: $error');
     }

@@ -235,6 +235,7 @@ class _TransferTile extends StatelessWidget {
               final speedText = Text(
                 '⚡ ${transfer.readableSpeed}',
                 maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 11,
                   color: YonTheme.yonOrange,
@@ -243,7 +244,7 @@ class _TransferTile extends StatelessWidget {
                 ),
               );
 
-              if (constraints.maxWidth < 440) {
+              if (constraints.maxWidth < 620) {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -260,7 +261,7 @@ class _TransferTile extends StatelessWidget {
                         Expanded(child: sizeText),
                         if (transfer.status == TransferStatus.transferring) ...[
                           const SizedBox(width: 8),
-                          speedText,
+                          Flexible(child: speedText),
                         ],
                       ],
                     ),
@@ -270,14 +271,14 @@ class _TransferTile extends StatelessWidget {
 
               return Row(
                 children: [
-                  statusText,
-                  const Spacer(),
+                  Expanded(flex: 2, child: statusText),
+                  const SizedBox(width: 10),
                   percentText,
                   const SizedBox(width: 10),
-                  sizeText,
+                  Expanded(flex: 3, child: sizeText),
                   if (transfer.status == TransferStatus.transferring) ...[
                     const SizedBox(width: 10),
-                    speedText,
+                    Flexible(flex: 2, child: speedText),
                   ],
                 ],
               );

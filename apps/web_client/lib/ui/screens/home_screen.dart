@@ -1170,6 +1170,8 @@ class _HomeScreenState extends State<HomeScreen> {
       hasActiveTransfer: _fileTransfers.hasActiveTransferForPeer(peer.id),
       connectionRoute: _connectionRoutes[peer.id] ?? 'unknown',
       onSendFile: () => _pickAndSend(peer),
+      onDropFiles: (files) => _sendFiles(peer, files),
+      onDropRejected: _snack,
       onDisconnect: _disconnectActivePeer,
       onAccept: _fileTransfers.acceptIncomingOffer,
       onReject: _fileTransfers.rejectIncomingOffer,

@@ -158,7 +158,7 @@
 ### HTTP Endpoints
 | Method | Path | ຄຳອະທິບາຍ |
 | :-- | :-- | :-- |
-| `GET` | `/health` | `{ "status": "ok", "activePeers": n }` (ສຳລັບ Coolify healthcheck) |
+| `GET` | `/health` | `{ "status": "ok", "activePeers": n, "turnConfigured": boolean, "turnUrlCount": n }` (Coolify healthcheck; TURN fields verify config presence only) |
 | `GET` | `/api/ice-servers` | ຄືນ STUN + TURN; ຖ້າຕັ້ງ TURN ຈະອອກ credentials ອາຍຸ 10 ນາທີ |
 | `GET` | `/*` | ເສີບ Flutter Web ທີ່ build ແລ້ວ (SPA fallback → `index.html`) |
 

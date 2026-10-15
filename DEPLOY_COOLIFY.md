@@ -93,7 +93,7 @@ https://yonfile.example.com
 | :-- | :-- | :-- |
 | `PORT` | `3000` | Port ຂອງ server (ຕ້ອງກົງກັບ Ports Exposes) |
 | `STUN_URL` | `stun:stun.l.google.com:19302` | STUN server (ຟຣີ) |
-| `TURN_URL` | `turn:turn.yonfile.example.com:3478,turn:turn.yonfile.example.com:3478?transport=tcp,turns:turn.yonfile.example.com:5349?transport=tcp` | TURN URLs ຄັ່ນດ້ວຍ comma; ໃຫ້ໃສ່ transport ທີ່ provider ເປີດໃຫ້ |
+| `TURN_URL` | `turn:turn.yonfile.example.com:3478,turn:turn.yonfile.example.com:3478?transport=tcp` | TURN URLs ຄັ່ນດ້ວຍ comma; ຕົວຢ່າງ Coturn ນີ້ເປີດ 3478 ເທົ່ານັ້ນ |
 | `TURN_SHARED_SECRET` | `<random-long-secret>` | Secret ສຳລັບອອກ credentials (HMAC) — ຕ້ອງຕົງກັບ Coturn |
 | `TURN_REALM` | `turn.yonfile.example.com` | Realm ຂອງ Coturn |
 | `TRUST_PROXY` | `true` | ເປີດສະເພາະເມື່ອ reverse proxy ຂຽນທັບ forwarded IP headers ຈາກ client |
@@ -113,23 +113,23 @@ https://yonfile.example.com
 2. ເບິ່ງ Build Logs ຈົນສຳເລັດ (Stage 1: Flutter build, Stage 2: TypeScript, Stage 3: Runtime).
 3. ກວດສຸຂະພາບ:
    ```bash
-   curl -s https://yonfile.example.com/health
-   # {"status":"ok","activePeers":0}
-   curl -s https://yonfile.example.com/api/ice-servers
-   # ຖ້າຕັ້ງ TURN ສຳເລັດ ຄວນເຫັນ iceServers ລາຍການ STUN ແລະ TURN
+   curl -fsS https://yonfile.example.com/health | jq '{status, turnConfigured, turnUrlCount}'
+   # ຄວນເຫັນ turnConfigured=true ແລະ turnUrlCount ຫຼາຍກວ່າ 0
+   curl -fsS https://yonfile.example.com/api/ice-servers | jq '[.iceServers[].urls]'
+   # ສະແດງ URL ເທົ່ານັ້ນ ເພື່ອບໍ່ໃຫ້ພິມ credentials ອອກ log
    ```
 4. ເປີດເວັບ `https://yonfile.example.com` ດ້ວຍ 2 ອຸປະກອນ ໃນເຄືອຂ່າຍດຽວກັນ ເພື່ອທົດສອບການເຫັນກັນ.
 
 ---
 
-## 8. (ທາງເລືອກ) TURN Server ສຳລັບຂ້າມ 4G/5G
+## 8. TURN Server ສຳລັບຂ້າມເຄືອຂ່າຍ
 
-ໃຊ້ສຳລັບກໍລະນີ NAT ແບບ Symmetric (ມືຖື 4G/5G ບາງຄ້າຍ) ທີ່ P2P ຊື່ອະທະຍະ.
+TURN ຈຳເປັນສຳລັບການຂ້າມເຄືອຂ່າຍທີ່ການເຊື່ອມຕໍ່ໂດຍກົງຜ່ານ NAT ບໍ່ໄດ້; ຄວນມີກ່ອນໃຊ້ງານຈິງລະຫວ່າງ 4G/5G ແລະ Wi‑Fi ຄົນລະວົງ.
 
 ### ທາງ A — Self-host Coturn ດ້ວຍ docker-compose
 
 1. ໃນ Coolify ສ້າງ Resource ປະເພດ **Docker Compose** ຈາກ Repo ດຽວກັນ
-   (ຫຼື ຕັ້ງ `docker-compose.yml` ນີ້ເປັນ compose build pack).
+   ແລະເປີດ profile `turn`. ການ deploy YonFile ແບບ Dockerfile ຢ່າງດຽວຈະບໍ່ເປີດ Coturn service ນີ້.
 2. ຕັ້ງ env `TURN_SHARED_SECRET` ແລະ `TURN_REALM` ໃຫ້ຄືກັບບໍລິການ `yonfile`.
 3. ເປີດ Service ດ້ວຍ profile `turn`:
    ```bash
@@ -141,6 +141,9 @@ https://yonfile.example.com
    | `3478` | TCP + UDP | TURN listening |
    | `49152-65535` | UDP | Relay range |
 5. ຕັ້ງ DNS `turn.yonfile.example.com` → IP Server ແລະໃສ່ URL ທີ່ໃຊ້ໄດ້ໃນ `TURN_URL`. Compose Coturn ຕົວຢ່າງນີ້ຟັງ UDP/TCP ທີ່ 3478; `turns:` ຈະຕ້ອງໃຊ້ TURN provider ຫຼື Coturn ທີ່ຕັ້ງ TLS certificate ແລ້ວ.
+6. ຖ້າ host ຢູ່ຫຼັງ NAT ໃຫ້ກຳນົດ public/private IP mapping ໃນ Coturn (`external-ip`) ແລະ forward relay ports ເຖິງ host; ເບິ່ງ [Coturn server options](https://github.com/coturn/coturn/wiki/turnserver).
+
+> `turnConfigured=true` ຢືນຢັນພຽງວ່າ server ມີ URL ແລະ secret ໃນ environment; ມັນບໍ່ໄດ້ຢືນຢັນວ່າ Coturn ຟັງພອດ ຫຼືຮັບ allocation ໄດ້. ຕ້ອງທົດສອບ relay ຈາກເຄືອຂ່າຍພາຍນອກອີກຄັ້ງ.
 
 ### ທາງ B — ໃຊ້ TURN ພາຍນອກ (Cloudflare Calls / Twilio / Metered)
 - ສ້າງ TURN credentials ຈາກ Provider.

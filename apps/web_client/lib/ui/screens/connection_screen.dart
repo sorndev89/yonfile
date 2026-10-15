@@ -1,9 +1,14 @@
+import 'dart:typed_data';
+
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/constants/app_config.dart';
 import '../../core/theme/yon_theme.dart';
 import '../../models/file_transfer_state.dart';
 import '../../models/incoming_file_offer.dart';
 import '../../models/peer_device.dart';
+import '../../models/picked_file.dart';
 import '../widgets/transfer_sheet.dart';
 import '../widgets/transfer_history_card.dart';
 import '../widgets/peer_os_badge.dart';
@@ -19,6 +24,8 @@ class ConnectionScreen extends StatelessWidget {
     required this.hasActiveTransfer,
     required this.connectionRoute,
     required this.onSendFile,
+    required this.onDropFiles,
+    required this.onDropRejected,
     required this.onDisconnect,
     required this.onAccept,
     required this.onReject,
@@ -33,6 +40,8 @@ class ConnectionScreen extends StatelessWidget {
   final bool hasActiveTransfer;
   final String connectionRoute;
   final VoidCallback onSendFile;
+  final Future<void> Function(List<PickedFile>) onDropFiles;
+  final ValueChanged<String> onDropRejected;
   final VoidCallback onDisconnect;
   final ValueChanged<String> onAccept;
   final ValueChanged<String> onReject;
@@ -169,6 +178,14 @@ class ConnectionScreen extends StatelessWidget {
                 ),
               ],
             ),
+            if (_supportsDesktopDrop(context)) ...[
+              const SizedBox(height: 12),
+              _ConnectionDropZone(
+                isTransferring: hasActiveTransfer,
+                onDropFiles: onDropFiles,
+                onDropRejected: onDropRejected,
+              ),
+            ],
             if (pendingOffers.isNotEmpty) ...[
               const SizedBox(height: 24),
               Text(
@@ -205,6 +222,214 @@ class ConnectionScreen extends StatelessWidget {
               TransferHistoryCard(transfers: transfers),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+bool _supportsDesktopDrop(BuildContext context) =>
+    switch (Theme.of(context).platform) {
+      TargetPlatform.macOS ||
+      TargetPlatform.windows ||
+      TargetPlatform.linux => true,
+      _ => false,
+    };
+
+class _ConnectionDropZone extends StatefulWidget {
+  const _ConnectionDropZone({
+    required this.isTransferring,
+    required this.onDropFiles,
+    required this.onDropRejected,
+  });
+
+  final bool isTransferring;
+  final Future<void> Function(List<PickedFile>) onDropFiles;
+  final ValueChanged<String> onDropRejected;
+
+  @override
+  State<_ConnectionDropZone> createState() => _ConnectionDropZoneState();
+}
+
+class _ConnectionDropZoneState extends State<_ConnectionDropZone> {
+  bool _dragging = false;
+
+  String _guessMime(String name) =>
+      switch (name.split('.').last.toLowerCase()) {
+        'png' => 'image/png',
+        'jpg' || 'jpeg' => 'image/jpeg',
+        'pdf' => 'application/pdf',
+        'mp4' => 'video/mp4',
+        'zip' => 'application/zip',
+        _ => 'application/octet-stream',
+      };
+
+  Stream<List<int>> _readDroppedFile(
+    DropItem item,
+    Uint8List? bookmark,
+  ) async* {
+    var hasScope = false;
+    try {
+      if (bookmark != null && bookmark.isNotEmpty) {
+        hasScope = await DesktopDrop.instance
+            .startAccessingSecurityScopedResource(bookmark: bookmark);
+      }
+      yield* item.openRead();
+    } finally {
+      if (hasScope) {
+        try {
+          await DesktopDrop.instance.stopAccessingSecurityScopedResource(
+            bookmark: bookmark!,
+          );
+        } catch (_) {}
+      }
+    }
+  }
+
+  Future<void> _handleDrop(DropDoneDetails details) async {
+    setState(() => _dragging = false);
+    if (details.files.isEmpty) return;
+
+    final picked = <PickedFile>[];
+    var totalBytes = 0;
+    for (final item in details.files) {
+      final bookmark = item.extraAppleBookmark;
+      var hasScope = false;
+      try {
+        if (bookmark != null && bookmark.isNotEmpty) {
+          hasScope = await DesktopDrop.instance
+              .startAccessingSecurityScopedResource(bookmark: bookmark);
+        }
+        final size = await item.length();
+        if (size < 0 || totalBytes + size > AppConfig.maxFileSizeBytes) {
+          if (hasScope && bookmark != null) {
+            await DesktopDrop.instance.stopAccessingSecurityScopedResource(
+              bookmark: bookmark,
+            );
+          }
+          widget.onDropRejected('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ 512 MB');
+          return;
+        }
+        totalBytes += size;
+        if (hasScope && bookmark != null) {
+          await DesktopDrop.instance.stopAccessingSecurityScopedResource(
+            bookmark: bookmark,
+          );
+          hasScope = false;
+        }
+        picked.add(
+          PickedFile(
+            name: item.name,
+            size: size,
+            readStream: _readDroppedFile(item, bookmark),
+            mimeType: item.mimeType ?? _guessMime(item.name),
+          ),
+        );
+      } catch (error) {
+        if (hasScope && bookmark != null) {
+          try {
+            await DesktopDrop.instance.stopAccessingSecurityScopedResource(
+              bookmark: bookmark,
+            );
+          } catch (_) {}
+        }
+        widget.onDropRejected('ອ່ານໄຟລ໌ ${item.name} ບໍ່ໄດ້: $error');
+        return;
+      }
+    }
+
+    if (picked.isNotEmpty) await widget.onDropFiles(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent = _dragging
+        ? YonTheme.yonOrange
+        : YonTheme.yonOrange.withValues(alpha: 0.45);
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _dragging = true),
+      onDragExited: (_) => setState(() => _dragging = false),
+      onDragDone: _handleDrop,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        decoration: BoxDecoration(
+          color: _dragging
+              ? YonTheme.yonOrange.withValues(alpha: 0.12)
+              : (isDark
+                    ? Colors.white.withValues(alpha: 0.025)
+                    : Colors.black.withValues(alpha: 0.02)),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: accent, width: _dragging ? 2 : 1),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final description = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _dragging ? 'ວາງໄຟລ໌ເພື່ອສົ່ງ' : 'ລາກໄຟລ໌ມາວາງທີ່ນີ້',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  widget.isTransferring
+                      ? 'ສາມາດວາງໄຟລ໌ເພີ່ມໄດ້ ໃນຂະນະທີ່ກຳລັງໂອນ'
+                      : 'ສົ່ງໄປຫາອຸປະກອນທີ່ເຊື່ອມຕໍ່',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : Colors.black54,
+                  ),
+                ),
+              ],
+            );
+            final icon = Icon(
+              _dragging
+                  ? Icons.file_download_done_rounded
+                  : Icons.drive_folder_upload_outlined,
+              color: YonTheme.yonOrange,
+              size: 28,
+            );
+            final maxSize = Text(
+              'ສູງສຸດ 512 MB',
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? Colors.white54 : Colors.black45,
+              ),
+            );
+            if (constraints.maxWidth < 460) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      icon,
+                      const SizedBox(width: 12),
+                      Expanded(child: description),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 40),
+                    child: maxSize,
+                  ),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                icon,
+                const SizedBox(width: 12),
+                Expanded(child: description),
+                const SizedBox(width: 8),
+                maxSize,
+              ],
+            );
+          },
         ),
       ),
     );
