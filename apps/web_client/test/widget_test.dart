@@ -14,6 +14,11 @@ void main() {
       expect(AppConfig.chunkSize, 16 * 1024);
     });
 
+    test('max file size is 10 GB per file and per batch', () {
+      expect(AppConfig.maxFileSizeBytes, 10 * 1024 * 1024 * 1024);
+      expect(AppConfig.maxFileSizeLabel, '10 GB');
+    });
+
     test('sha256Of returns 64-char hex digest', () {
       final digest = chunker.sha256Of(Uint8List.fromList([1, 2, 3, 4]));
       expect(digest.length, 64);

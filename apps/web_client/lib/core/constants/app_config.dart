@@ -20,7 +20,12 @@ class AppConfig {
 
   /// ຍົກເລີກ transfer ເມື່ອ buffer ບໍ່ຫຼຸດ ຫຼືຜູ້ຮັບບໍ່ໄດ້ຮັບຂໍ້ມູນ.
   static const int transferStallTimeoutSeconds = 45;
-  static const int maxFileSizeBytes = 512 * 1024 * 1024;
+
+  /// ຂະໜາດໄຟລ໌ສູງສຸດຕໍ່ໄຟລ໌ ແລະ ຕໍ່ຮອບ (10 GB).
+  static const int maxFileSizeBytes = 10 * 1024 * 1024 * 1024;
+
+  /// ຂໍ້ຄວາມສຳລັບສະແດງຂີດຈຳກັດໃຫ້ຜູ້ໃຊ້.
+  static const String maxFileSizeLabel = '10 GB';
 
   static const String _envSignalingUrl = String.fromEnvironment(
     'SIGNALING_URL',

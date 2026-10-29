@@ -54,7 +54,7 @@
   (poll ທຸກ 20ms) ຈົນ buffer ຫຼຸດລົງ ເພື່ອບໍ່ໃຫ້ browser/ອຸປະກອນ ຄ້າງ.
 - **ກວດສອບ:** ສົ່ງ SHA-256 ຕອນ `eof`; ປາຍທາງກວດທັງ **ຂະໜາດ** ແລະ **SHA-256** ກ່ອນ
   ບັນທຶກ ແລະ ຕອບກັບ `transfer-complete`.
-- **ຂີດຈຳກັດ:** ຂະໜາດສູງສຸດ **512 MB**. ທັງຝັ່ງສົ່ງແລະຮັບ stream ເປັນຕ່ອນ; ຝັ່ງຮັບຂຽນໃສ່ temp file ແລະສົ່ງ ACK ທຸກ **256 KB** ຫຼັງ flush ລົງ storage. ກວດ SHA-256 ກ່ອນເປີດ save dialog ແລະຢືນຢັນສຳເລັດ.
+- **ຂີດຈຳກັດ:** ຂະໜາດສູງສຸດ **10 GB** ຕໍ່ໄຟລ໌ ແລະ ຕໍ່ຮອບ. ທັງຝັ່ງສົ່ງແລະຮັບ stream ເປັນຕ່ອນ; ຝັ່ງຮັບຂຽນໃສ່ temp file ແລະສົ່ງ ACK ທຸກ **256 KB** ຫຼັງ flush ລົງ storage. ກວດ SHA-256 ກ່ອນເປີດ save dialog ແລະຢືນຢັນສຳເລັດ.
 
 ---
 
@@ -323,7 +323,7 @@ cd apps/web_client && flutter build ios --release --no-codesign
 
 ## 13. ຂີດຈຳກັດທີ່ຮູ້
 
-- ຝັ່ງຮັບ stream ລົງ temp storage ແລະຈຳກັດ buffer ດ້ວຍ ACK window; ກ່ອນໂຍນໄຟລ໌ໃຫຍ່ໃຫ້ເຫຼືອພື້ນທີ່ storage ຢ່າງໜ້ອຍເທົ່າຂະໜາດໄຟລ໌.
+- ຝັ່ງຮັບ stream ລົງ temp storage ແລະຈຳກັດ buffer ດ້ວຍ ACK window; ສຳລັບ Chrome/Edge ໃຊ້ File System Access API stream ລົງ disk ໂດຍກົງ (ຮອງຮັບສູງສຸດ 10 GB), ສ່ວນ Safari (iOS/macOS) ແລະ Firefox ຈະດາວໂຫຼດຜ່ານ Blob fallback (ຈຳກັດ memory ສູງສຸດ 1.5 GB).
 - ປະຫວັດການສົ່ງສູງສຸດ 100 ລາຍການຖືກເກັບໃນ SharedPreferences ຂອງເຄື່ອງ; ໃຊ້ປຸ່ມລ້າງປະຫວັດໃນໜ້າການໂອນ.
 - ການຈັດກຸ່ມ LAN ອີງ Public IP (ບໍ່ຢືນຢັນ LAN 100%) — ໃຊ້ PIN ເມື່ອບໍ່ແນ່ໃຈ.
 - Signaling ເກັບ peer ໃນ memory ຢ່າງດຽວ (ຮອງຮັບ single-instance).

@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../controllers/file_transfer_controller.dart';
@@ -274,6 +275,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final completedNewTransfer = completedIds.any(
       (id) => !_knownCompletedTransfers.contains(id),
     );
+    if (completedNewTransfer) {
+      HapticFeedback.lightImpact();
+    }
     _knownCompletedTransfers.addAll(completedIds);
     final hasActiveTransfers = _fileTransfers.transfers.any(
       (transfer) => transfer.isActive,
@@ -387,11 +391,11 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
         if (totalBytes + size > AppConfig.maxFileSizeBytes) {
-          _snack('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ 512 MB');
+          _snack('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ ${AppConfig.maxFileSizeLabel}');
           return;
         }
         if (size > AppConfig.maxFileSizeBytes) {
-          _snack('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ 512 MB');
+          _snack('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ ${AppConfig.maxFileSizeLabel}');
           return;
         }
         totalBytes += size;
@@ -434,7 +438,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _sendFiles(PeerDevice peer, List<PickedFile> files) async {
     if (files.fold<int>(0, (sum, file) => sum + file.size) >
         AppConfig.maxFileSizeBytes) {
-      _snack('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ 512 MB');
+      _snack('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ ${AppConfig.maxFileSizeLabel}');
       return;
     }
     if (!await _ensurePinAccess(peer)) return;
@@ -657,17 +661,30 @@ class _HomeScreenState extends State<HomeScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(hintText: 'ພິມຂໍ້ຄວາມ...'),
+          maxLines: 4,
+          decoration: InputDecoration(
+            hintText: 'ພິມຂໍ້ຄວາມ ຫຼື ລິ້ງ...',
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.paste_rounded, size: 20),
+              tooltip: 'ວາງຈາກ Clipboard',
+              onPressed: () async {
+                final data = await Clipboard.getData(Clipboard.kTextPlain);
+                if (data?.text != null && data!.text!.isNotEmpty) {
+                  controller.text = data.text!;
+                }
+              },
+            ),
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('ຍົກເລີກ'),
           ),
-          ElevatedButton(
+          ElevatedButton.icon(
+            icon: const Icon(Icons.send_rounded, size: 16),
             onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('ສົ່ງ'),
+            label: const Text('ສົ່ງ'),
           ),
         ],
       ),
@@ -769,12 +786,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showIncomingText(String peerId, String text) {
     if (!mounted) return;
+    HapticFeedback.lightImpact();
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('ຂໍ້ຄວາມຈາກ ${_peerName(peerId)}'),
-        content: Text(text),
+        content: SelectableText(text),
         actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.copy_rounded, size: 18),
+            label: const Text('ກັອບປີ້'),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: text));
+              Navigator.pop(context);
+              _snack('ກັອບປີ້ຂໍ້ຄວາມແລ້ວ');
+            },
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('ປິດ'),
@@ -1173,6 +1200,7 @@ class _HomeScreenState extends State<HomeScreen> {
       onDropFiles: (files) => _sendFiles(peer, files),
       onDropRejected: _snack,
       onDisconnect: _disconnectActivePeer,
+      onSendText: () => _sendTextMessage(peer),
       onAccept: _fileTransfers.acceptIncomingOffer,
       onReject: _fileTransfers.rejectIncomingOffer,
       onCancelTransfer: _fileTransfers.cancelTransfer,

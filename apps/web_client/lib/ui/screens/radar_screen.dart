@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 
@@ -94,30 +96,78 @@ class _RadarScreenState extends State<RadarScreen> {
     }
   }
 
+  Stream<List<int>> _readDroppedFile(
+    DropItem item,
+    Uint8List? bookmark,
+  ) async* {
+    var hasScope = false;
+    try {
+      if (bookmark != null && bookmark.isNotEmpty) {
+        hasScope = await DesktopDrop.instance
+            .startAccessingSecurityScopedResource(bookmark: bookmark);
+      }
+      yield* item.openRead();
+    } finally {
+      if (hasScope) {
+        try {
+          await DesktopDrop.instance.stopAccessingSecurityScopedResource(
+            bookmark: bookmark!,
+          );
+        } catch (_) {}
+      }
+    }
+  }
+
   Future<void> _handleDrop(DropDoneDetails details) async {
     setState(() => _draggingOver = false);
     final picked = <PickedFile>[];
     var totalBytes = 0;
     for (final item in details.files) {
-      final knownSize = await item.length();
-      if (totalBytes + knownSize > AppConfig.maxFileSizeBytes) {
-        widget.onDropRejected('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ 512 MB');
+      final bookmark = item.extraAppleBookmark;
+      var hasScope = false;
+      try {
+        if (bookmark != null && bookmark.isNotEmpty) {
+          hasScope = await DesktopDrop.instance
+              .startAccessingSecurityScopedResource(bookmark: bookmark);
+        }
+        final size = await item.length();
+        if (size < 0 || totalBytes + size > AppConfig.maxFileSizeBytes) {
+          if (hasScope && bookmark != null) {
+            await DesktopDrop.instance.stopAccessingSecurityScopedResource(
+              bookmark: bookmark,
+            );
+          }
+          widget.onDropRejected(
+            'ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ ${AppConfig.maxFileSizeLabel}',
+          );
+          return;
+        }
+        totalBytes += size;
+        if (hasScope && bookmark != null) {
+          await DesktopDrop.instance.stopAccessingSecurityScopedResource(
+            bookmark: bookmark,
+          );
+          hasScope = false;
+        }
+        picked.add(
+          PickedFile(
+            name: item.name,
+            size: size,
+            readStream: _readDroppedFile(item, bookmark),
+            mimeType: item.mimeType ?? _guessMime(item.name),
+          ),
+        );
+      } catch (error) {
+        if (hasScope && bookmark != null) {
+          try {
+            await DesktopDrop.instance.stopAccessingSecurityScopedResource(
+              bookmark: bookmark,
+            );
+          } catch (_) {}
+        }
+        widget.onDropRejected('ອ່ານໄຟລ໌ ${item.name} ບໍ່ໄດ້: $error');
         return;
       }
-      final bytes = await item.readAsBytes();
-      if (totalBytes + bytes.length > AppConfig.maxFileSizeBytes) {
-        widget.onDropRejected('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ 512 MB');
-        return;
-      }
-      totalBytes += bytes.length;
-      picked.add(
-        PickedFile(
-          name: item.name,
-          size: bytes.length,
-          bytes: bytes,
-          mimeType: _guessMime(item.name),
-        ),
-      );
     }
     if (picked.isNotEmpty) await widget.onDroppedFiles(picked, null);
   }

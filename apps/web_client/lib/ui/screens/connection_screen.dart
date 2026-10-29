@@ -30,6 +30,7 @@ class ConnectionScreen extends StatelessWidget {
     required this.onAccept,
     required this.onReject,
     required this.onCancelTransfer,
+    this.onSendText,
     this.showHistory = true,
   });
 
@@ -46,6 +47,7 @@ class ConnectionScreen extends StatelessWidget {
   final ValueChanged<String> onAccept;
   final ValueChanged<String> onReject;
   final ValueChanged<String> onCancelTransfer;
+  final VoidCallback? onSendText;
   final bool showHistory;
 
   @override
@@ -171,6 +173,12 @@ class ConnectionScreen extends StatelessWidget {
                   icon: const Icon(Icons.upload_file_rounded),
                   label: const Text('ເລືອກໄຟລ໌ສົ່ງ'),
                 ),
+                if (onSendText != null)
+                  OutlinedButton.icon(
+                    onPressed: onSendText,
+                    icon: const Icon(Icons.chat_bubble_outline_rounded),
+                    label: const Text('ສົ່ງຂໍ້ຄວາມ / ລິ້ງ'),
+                  ),
                 OutlinedButton.icon(
                   onPressed: onDisconnect,
                   icon: const Icon(Icons.link_off_rounded),
@@ -307,7 +315,9 @@ class _ConnectionDropZoneState extends State<_ConnectionDropZone> {
               bookmark: bookmark,
             );
           }
-          widget.onDropRejected('ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ 512 MB');
+          widget.onDropRejected(
+            'ຂະໜາດລວມຂອງໄຟລ໌ເກີນຂີດຈຳກັດ ${AppConfig.maxFileSizeLabel}',
+          );
           return;
         }
         totalBytes += size;
@@ -395,7 +405,7 @@ class _ConnectionDropZoneState extends State<_ConnectionDropZone> {
               size: 28,
             );
             final maxSize = Text(
-              'ສູງສຸດ 512 MB',
+              'ສູງສຸດ ${AppConfig.maxFileSizeLabel}',
               style: TextStyle(
                 fontSize: 11,
                 color: isDark ? Colors.white54 : Colors.black45,
