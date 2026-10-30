@@ -49,12 +49,12 @@
 | 15 | **ປອດໄພ** | DTLS E2E, Zero-Storage, ຈຳກັດຂະໜາດ, ປ້ອງກັນ IP/PIN |
 
 ### ລາຍລະອຽດການສົ່ງໄຟລ໌
-- **Chunk:** ຕັດໄຟລ໌ອອກເປັນຕ່ອນລະ **16 KB** (`16,384 bytes`).
-- **Backpressure:** ກ່ອນສົ່ງແຕ່ລະ chunk ຈະກວດ `bufferedAmount`; ຖ້າເກີນ **1 MB** ຈະລໍຖ້າ
-  (poll ທຸກ 20ms) ຈົນ buffer ຫຼຸດລົງ ເພື່ອບໍ່ໃຫ້ browser/ອຸປະກອນ ຄ້າງ.
+- **Chunk:** ຕັດໄຟລ໌ອອກເປັນຕ່ອນລະ **64 KB** (`65,536 bytes`) ເພື່ອໃຫ້ໄດ້ Throughput ສູງສຸດ.
+- **Backpressure:** ກ່ອນສົ່ງແຕ່ລະ chunk ຈະກວດ `bufferedAmount`; ຖ້າເກີນ **4 MB** ຈະລໍຖ້າ
+  (poll ທຸກ 4ms) ຈົນ buffer ຫຼຸດລົງ ເພື່ອບໍ່ໃຫ້ browser/ອຸປະກອນ ຄ້າງ.
 - **ກວດສອບ:** ສົ່ງ SHA-256 ຕອນ `eof`; ປາຍທາງກວດທັງ **ຂະໜາດ** ແລະ **SHA-256** ກ່ອນ
   ບັນທຶກ ແລະ ຕອບກັບ `transfer-complete`.
-- **ຂີດຈຳກັດ:** ຂະໜາດສູງສຸດ **10 GB** ຕໍ່ໄຟລ໌ ແລະ ຕໍ່ຮອບ. ທັງຝັ່ງສົ່ງແລະຮັບ stream ເປັນຕ່ອນ; ຝັ່ງຮັບຂຽນໃສ່ temp file ແລະສົ່ງ ACK ທຸກ **256 KB** ຫຼັງ flush ລົງ storage. ກວດ SHA-256 ກ່ອນເປີດ save dialog ແລະຢືນຢັນສຳເລັດ.
+- **ຂີດຈຳກັດ:** ຂະໜາດສູງສຸດ **10 GB** ຕໍ່ໄຟລ໌ ແລະ ຕໍ່ຮອບ. ທັງຝັ່ງສົ່ງແລະຮັບ stream ເປັນຕ່ອນ; ຝັ່ງຮັບຂຽນໃສ່ temp file/disk stream ແລະສົ່ງ ACK ທຸກ **2 MB**. ກວດ SHA-256 ກ່ອນເປີດ save dialog ແລະຢືນຢັນສຳເລັດ.
 
 ---
 
@@ -79,7 +79,7 @@
 [Sender]                                                    [Receiver]
    |--- 1. JSON {"type":"offer-file","id","name","size","mime"} ---->|
    |<-- 2. JSON {"type":"accept-file","id"}  ຫຼື "reject-file" -------|
-   |--- 3. Binary chunks (16 KB, max 256 KB per window) ------------>|
+   |--- 3. Binary chunks (64 KB, max 2 MB per window) -------------->|
    |<-- 4. JSON {"type":"chunk-ack","id","received"} ---------------|
    |--- 5. JSON {"type":"eof","id","sha256"} ----------------------->|
    |<-- 6. JSON {"type":"transfer-complete","id","verified"} --------|
@@ -90,8 +90,8 @@
 | `offer-file` | Sender → Receiver | ສະເໜີສົ່ງໄຟລ໌ (id, name, size, mime) |
 | `accept-file` | Receiver → Sender | ຍອມຮັບ |
 | `reject-file` | Receiver → Sender | ປະຕິເສດ / ໄຟລ໌ໃຫຍ່ເກີນ / ຊ່ອງບໍ່ຫວ່າງ |
-| *(binary)* | Sender → Receiver | ຕ່ອນຂໍ້ມູນ 16 KB |
-| `chunk-ack` | Receiver → Sender | ຢືນຢັນ bytes ຫຼັງຂຽນລົງ storage ທຸກ 256 KB |
+| *(binary)* | Sender → Receiver | ຕ່ອນຂໍ້ມູນ 64 KB |
+| `chunk-ack` | Receiver → Sender | ຢືນຢັນ bytes ຫຼັງຂຽນລົງ storage ທຸກ 2 MB |
 | `flush-window` | Sender → Receiver | ຂໍ flush ແລະ ACK ຂອງຊ່ວງສຸດທ້າຍ |
 | `eof` | Sender → Receiver | ສິ້ນສຸດ + SHA-256 |
 | `transfer-complete` | Receiver → Sender | ຜົນກວດສອບ |

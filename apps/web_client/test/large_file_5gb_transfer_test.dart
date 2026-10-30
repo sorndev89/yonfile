@@ -94,8 +94,8 @@ void main() {
     test(
       'FileChunkerService streams 5GB chunks with backpressure and progress tracking',
       () async {
-        // ຈຳລອງ stream ທີ່ສົ່ງ chunk ຂະໜາດ 16KB ຊໍ້າກັນຈົນຄົບ 5GB
-        const int chunkSize = AppConfig.chunkSize; // 16 KB
+        // ຈຳລອງ stream ທີ່ສົ່ງ chunk ຂະໜາດ 64KB
+        const int chunkSize = AppConfig.chunkSize; // 64 KB
         const int numberOfChunks = 500; // ຈຳລອງ 500 chunks ເພື່ອ run test ໄວ
         const int simulatedSize = numberOfChunks * chunkSize;
 

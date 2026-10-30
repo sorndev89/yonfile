@@ -10,8 +10,8 @@ void main() {
   final chunker = FileChunkerService();
 
   group('FileChunkerService', () {
-    test('chunk size is 16KB for broad RTC data channel compatibility', () {
-      expect(AppConfig.chunkSize, 16 * 1024);
+    test('chunk size is 64KB for high throughput and broad RTC data channel compatibility', () {
+      expect(AppConfig.chunkSize, 64 * 1024);
     });
 
     test('max file size is 10 GB per file and per batch', () {

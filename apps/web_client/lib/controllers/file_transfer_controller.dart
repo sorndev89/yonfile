@@ -49,7 +49,8 @@ class FileTransferController extends ChangeNotifier {
   final Map<String, String> _transferPeers = {};
   final Map<String, IncomingFileOffer> _pendingIncomingOffers = {};
   final Set<String> _cancelled = {};
-  static const int _ackWindowBytes = 256 * 1024;
+  final Map<String, int> _lastIncomingUiMs = {};
+  static const int _ackWindowBytes = 2 * 1024 * 1024;
   final ValueNotifier<int> revision = ValueNotifier(0);
   late final StreamSubscription<PeerMessage> _messageSubscription;
   late final Future<void> _historyReady;
@@ -138,15 +139,20 @@ class FileTransferController extends ChangeNotifier {
         (t) => t.copyWith(status: TransferStatus.transferring),
       );
       final stopwatch = Stopwatch()..start();
+      var lastUiMs = 0;
       void onProgress(int sent) {
-        final seconds = stopwatch.elapsedMilliseconds / 1000.0;
-        _updateTransfer(
-          id,
-          (t) => t.copyWith(
-            transferred: sent,
-            bytesPerSecond: seconds > 0.2 ? sent / seconds : 0,
-          ),
-        );
+        final nowMs = stopwatch.elapsedMilliseconds;
+        if (sent >= file.size || nowMs - lastUiMs >= 100) {
+          lastUiMs = nowMs;
+          final seconds = nowMs / 1000.0;
+          _updateTransfer(
+            id,
+            (t) => t.copyWith(
+              transferred: sent,
+              bytesPerSecond: seconds > 0.2 ? sent / seconds : 0,
+            ),
+          );
+        }
       }
 
       final sha = file.readStream != null
@@ -575,13 +581,18 @@ class FileTransferController extends ChangeNotifier {
     final unacked = (_incomingUnackedBytes[id] ?? 0) + bytes.length;
     _incomingUnackedBytes[id] = unacked;
     if (unacked >= _ackWindowBytes) await _ackIncoming(peerId, id, incoming);
-    _updateTransfer(
-      id,
-      (t) => t.copyWith(
-        transferred: incoming.received,
-        bytesPerSecond: incoming.bytesPerSecond,
-      ),
-    );
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final lastUi = _lastIncomingUiMs[id] ?? 0;
+    if (incoming.received >= incoming.fileSize || nowMs - lastUi >= 100) {
+      _lastIncomingUiMs[id] = nowMs;
+      _updateTransfer(
+        id,
+        (t) => t.copyWith(
+          transferred: incoming.received,
+          bytesPerSecond: incoming.bytesPerSecond,
+        ),
+      );
+    }
   }
 
   void _flushIncomingWindow(String peerId, Map<String, dynamic> data) {
@@ -604,7 +615,6 @@ class FileTransferController extends ChangeNotifier {
     String id,
     IncomingFile incoming,
   ) async {
-    await incoming.sink?.flush();
     _incomingUnackedBytes[id] = 0;
     if (_webrtc.isOpen(peerId)) {
       await _webrtc.sendText(
@@ -624,6 +634,7 @@ class FileTransferController extends ChangeNotifier {
     incoming.dispose();
     await incoming.sink?.abort();
     _incomingUnackedBytes.remove(id);
+    _lastIncomingUiMs.remove(id);
     if (_activeIncomingId[peerId] == id) _activeIncomingId.remove(peerId);
     _transferPeers.remove(id);
     _updateTransfer(
@@ -687,6 +698,7 @@ class FileTransferController extends ChangeNotifier {
     _incoming.remove(id);
     _incomingWrites.remove(id);
     _incomingUnackedBytes.remove(id);
+    _lastIncomingUiMs.remove(id);
     _activeIncomingId.remove(peerId);
     _transferPeers.remove(id);
   }
