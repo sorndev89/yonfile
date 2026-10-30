@@ -7,6 +7,7 @@ import '../../core/constants/app_config.dart';
 import '../../core/theme/yon_theme.dart';
 import '../../models/peer_device.dart';
 import '../../models/picked_file.dart';
+import '../../services/file_stream_helper.dart';
 import '../widgets/radar_canvas.dart';
 import '../widgets/radar_peers.dart';
 
@@ -98,6 +99,7 @@ class _RadarScreenState extends State<RadarScreen> {
 
   Stream<List<int>> _readDroppedFile(
     DropItem item,
+    int fileSize,
     Uint8List? bookmark,
   ) async* {
     var hasScope = false;
@@ -106,7 +108,7 @@ class _RadarScreenState extends State<RadarScreen> {
         hasScope = await DesktopDrop.instance
             .startAccessingSecurityScopedResource(bookmark: bookmark);
       }
-      yield* item.openRead();
+      yield* FileStreamHelper.streamFile(item, fileSize);
     } finally {
       if (hasScope) {
         try {
@@ -153,7 +155,7 @@ class _RadarScreenState extends State<RadarScreen> {
           PickedFile(
             name: item.name,
             size: size,
-            readStream: _readDroppedFile(item, bookmark),
+            readStream: _readDroppedFile(item, size, bookmark),
             mimeType: item.mimeType ?? _guessMime(item.name),
           ),
         );

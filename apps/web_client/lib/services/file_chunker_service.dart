@@ -45,7 +45,9 @@ class FileChunkerService {
           throw StateError('Picked file size changed while sending');
         }
         hashSink.add(source);
-        final sourceBytes = Uint8List.fromList(source);
+        final sourceBytes = source is Uint8List
+            ? source
+            : Uint8List.fromList(source);
         for (var offset = 0; offset < source.length; offset += chunkSize) {
           if (isCancelled()) throw const TransferCancelledException();
           if (!isChannelOpen()) throw const TransferStalledException();

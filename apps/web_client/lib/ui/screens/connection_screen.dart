@@ -9,6 +9,7 @@ import '../../models/file_transfer_state.dart';
 import '../../models/incoming_file_offer.dart';
 import '../../models/peer_device.dart';
 import '../../models/picked_file.dart';
+import '../../services/file_stream_helper.dart';
 import '../widgets/transfer_sheet.dart';
 import '../widgets/transfer_history_card.dart';
 import '../widgets/peer_os_badge.dart';
@@ -274,6 +275,7 @@ class _ConnectionDropZoneState extends State<_ConnectionDropZone> {
 
   Stream<List<int>> _readDroppedFile(
     DropItem item,
+    int fileSize,
     Uint8List? bookmark,
   ) async* {
     var hasScope = false;
@@ -282,7 +284,7 @@ class _ConnectionDropZoneState extends State<_ConnectionDropZone> {
         hasScope = await DesktopDrop.instance
             .startAccessingSecurityScopedResource(bookmark: bookmark);
       }
-      yield* item.openRead();
+      yield* FileStreamHelper.streamFile(item, fileSize);
     } finally {
       if (hasScope) {
         try {
@@ -331,7 +333,7 @@ class _ConnectionDropZoneState extends State<_ConnectionDropZone> {
           PickedFile(
             name: item.name,
             size: size,
-            readStream: _readDroppedFile(item, bookmark),
+            readStream: _readDroppedFile(item, size, bookmark),
             mimeType: item.mimeType ?? _guessMime(item.name),
           ),
         );

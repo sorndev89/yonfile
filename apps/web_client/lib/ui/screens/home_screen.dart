@@ -14,6 +14,7 @@ import '../../core/theme/yon_theme.dart';
 import '../../models/file_transfer_state.dart';
 import '../../models/peer_device.dart';
 import '../../models/picked_file.dart';
+import '../../services/file_stream_helper.dart';
 import '../../services/local_signaling_host.dart';
 import '../../services/lan_discovery.dart';
 import '../../services/device_name_service.dart';
@@ -403,7 +404,7 @@ class _HomeScreenState extends State<HomeScreen> {
           PickedFile(
             name: f.name,
             size: size,
-            readStream: f.readAsByteStream(),
+            readStream: FileStreamHelper.streamFile(f, size),
             mimeType: _guessMime(f.name),
           ),
         );

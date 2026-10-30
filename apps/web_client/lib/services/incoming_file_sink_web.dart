@@ -6,15 +6,10 @@ import 'package:web/web.dart' as web;
 
 import 'incoming_file_sink.dart';
 
-@JS('window.showSaveFilePicker')
-external JSPromise<web.FileSystemFileHandle>? _showSaveFilePicker(JSAny options);
-
-@JS('window')
-external JSObject get _window;
-
 bool _supportsShowSaveFilePicker() {
   try {
-    return _window.has('showSaveFilePicker');
+    final win = web.window as JSObject;
+    return win.has('showSaveFilePicker');
   } catch (_) {
     return false;
   }
@@ -23,13 +18,15 @@ bool _supportsShowSaveFilePicker() {
 Future<IncomingFileSink> createIncomingFileSink(String fileName) async {
   if (_supportsShowSaveFilePicker()) {
     try {
+      final win = web.window as JSObject;
       final options = _SavePickerOptions(suggestedName: fileName);
-      final promise = _showSaveFilePicker(options);
-      if (promise != null) {
-        final handle = await promise.toDart;
-        final writer = await handle.createWritable().toDart;
-        return _WebIncomingFileSink(writer);
-      }
+      final promise = win.callMethod<JSPromise<web.FileSystemFileHandle>>(
+        'showSaveFilePicker'.toJS,
+        options,
+      );
+      final handle = await promise.toDart;
+      final writer = await handle.createWritable().toDart;
+      return _WebIncomingFileSink(writer);
     } catch (e) {
       // If user cancelled save picker, rethrow so offer is rejected as intended
       final errStr = e.toString().toLowerCase();
@@ -64,7 +61,7 @@ class _BlobIncomingFileSink implements IncomingFileSink {
     _totalBytes += u8.length;
     if (_totalBytes > _maxInMemoryBytes) {
       throw StateError(
-        'Browser ບໍ່ຮອງຮັບ stream ລົງ disk ແລະໄຟລ໌ໃຫຍ່ເກີນຂີດຈຳກັດ memory (1.5 GB). ກະລຸນາໃຊ້ Chrome ຫຼື Edge.',
+        'Browser ບໍ່ຮອງຮັບ stream ລົງ disk (ຫຼືບໍ່ໄດ້ໃຊ້ HTTPS) ແລະໄຟລ໌ໃຫຍ່ເກີນຂີດຈຳກັດ memory (1.5 GB). ກະລຸນາໃຊ້ Chrome/Edge ຜ່ານ HTTPS ຫຼື ໃຊ້ YonFile App ແທນ.',
       );
     }
     _chunks.add(u8);

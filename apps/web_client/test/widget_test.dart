@@ -107,6 +107,27 @@ void main() {
         throwsA(isA<StateError>()),
       );
     });
+
+    test('sendStream handles native Uint8List stream chunks efficiently', () async {
+      final part1 = Uint8List.fromList(List.generate(20000, (i) => i % 256));
+      final part2 = Uint8List.fromList(List.generate(15000, (i) => (i + 1) % 256));
+      final expectedBytes = Uint8List.fromList([...part1, ...part2]);
+
+      final sentChunks = <Uint8List>[];
+      final digest = await chunker.sendStream(
+        stream: Stream.fromIterable([part1, part2]),
+        expectedSize: expectedBytes.length,
+        sendChunk: (chunk) async => sentChunks.add(chunk),
+        bufferedAmount: () => 0,
+        onProgress: (_) {},
+        isCancelled: () => false,
+        isChannelOpen: () => true,
+      );
+
+      final assembled = Uint8List.fromList(sentChunks.expand((c) => c).toList());
+      expect(assembled, equals(expectedBytes));
+      expect(digest, chunker.sha256Of(expectedBytes));
+    });
   });
 
   group('IncomingFile', () {

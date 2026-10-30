@@ -323,7 +323,7 @@ cd apps/web_client && flutter build ios --release --no-codesign
 
 ## 13. ຂີດຈຳກັດທີ່ຮູ້
 
-- ຝັ່ງຮັບ stream ລົງ temp storage ແລະຈຳກັດ buffer ດ້ວຍ ACK window; ສຳລັບ Chrome/Edge ໃຊ້ File System Access API stream ລົງ disk ໂດຍກົງ (ຮອງຮັບສູງສຸດ 10 GB), ສ່ວນ Safari (iOS/macOS) ແລະ Firefox ຈະດາວໂຫຼດຜ່ານ Blob fallback (ຈຳກັດ memory ສູງສຸດ 1.5 GB).
+- ຝັ່ງຮັບ stream ລົງ temp storage ແລະຈຳກັດ buffer ດ້ວຍ ACK window; ສຳລັບ Chrome/Edge ໃຊ້ File System Access API stream ລົງ disk ໂດຍກົງເມື່ອໃຊ້ຜ່ານ HTTPS/localhost (ຮອງຮັບສູງສຸດ 10 GB), ສ່ວນ Safari (iOS/macOS), Firefox ຫຼື HTTP ໃນ LAN ຈະດາວໂຫຼດຜ່ານ Blob fallback (ຈຳກັດ memory ສູງສຸດ 1.5 GB).
 - ປະຫວັດການສົ່ງສູງສຸດ 100 ລາຍການຖືກເກັບໃນ SharedPreferences ຂອງເຄື່ອງ; ໃຊ້ປຸ່ມລ້າງປະຫວັດໃນໜ້າການໂອນ.
 - ການຈັດກຸ່ມ LAN ອີງ Public IP (ບໍ່ຢືນຢັນ LAN 100%) — ໃຊ້ PIN ເມື່ອບໍ່ແນ່ໃຈ.
 - Signaling ເກັບ peer ໃນ memory ຢ່າງດຽວ (ຮອງຮັບ single-instance).
