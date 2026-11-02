@@ -15,6 +15,15 @@ bool _supportsShowSaveFilePicker() {
   }
 }
 
+bool _supportsShowDirectoryPicker() {
+  try {
+    final win = web.window as JSObject;
+    return win.has('showDirectoryPicker');
+  } catch (_) {
+    return false;
+  }
+}
+
 Future<IncomingFileSink> createIncomingFileSink(String fileName) async {
   if (_supportsShowSaveFilePicker()) {
     try {
@@ -39,9 +48,77 @@ Future<IncomingFileSink> createIncomingFileSink(String fileName) async {
   return _BlobIncomingFileSink(fileName);
 }
 
+/// ເລືອກໂຟນເດີປາຍທາງພຽງຄັ້ງດຽວ ແລ້ວຂຽນທຸກໄຟລ໌ໃນ batch ລົງໂຟນເດີນັ້ນ.
+/// ຕ້ອງເອີ້ນພາຍໃນ user gesture (ປຸ່ມ Accept).
+Future<IncomingBatchSinkFactory?> createIncomingBatchSinkFactory() async {
+  if (!_supportsShowDirectoryPicker()) return _BlobBatchSinkFactory();
+  try {
+    final win = web.window as JSObject;
+    final promise = win.callMethod<JSPromise<web.FileSystemDirectoryHandle>>(
+      'showDirectoryPicker'.toJS,
+    );
+    final handle = await promise.toDart;
+    return _DirectoryBatchSinkFactory(handle);
+  } catch (e) {
+    final errStr = e.toString().toLowerCase();
+    if (errStr.contains('aborterror') || errStr.contains('user cancelled')) {
+      rethrow;
+    }
+    return _BlobBatchSinkFactory();
+  }
+}
+
 @JS()
 extension type _SavePickerOptions._(JSObject _) implements JSObject {
   external factory _SavePickerOptions({String suggestedName});
+}
+
+class _DirectoryBatchSinkFactory implements IncomingBatchSinkFactory {
+  _DirectoryBatchSinkFactory(this._directory);
+
+  final web.FileSystemDirectoryHandle _directory;
+  final Set<String> _usedNames = {};
+
+  @override
+  Future<IncomingFileSink> create(String fileName) async {
+    final name = _uniqueName(fileName);
+    final handle = await _directory
+        .getFileHandle(name, web.FileSystemGetFileOptions(create: true))
+        .toDart;
+    final writer = await handle.createWritable().toDart;
+    return _WebIncomingFileSink(writer);
+  }
+
+  String _uniqueName(String rawName) {
+    final sanitized = rawName
+        .replaceAll(RegExp(r'[\\/\u0000-\u001f]'), '_')
+        .trim();
+    final base = sanitized.isEmpty ? 'file' : sanitized;
+    var candidate = base;
+    var index = 1;
+    while (_usedNames.contains(candidate.toLowerCase())) {
+      final dot = base.lastIndexOf('.');
+      final stem = dot > 0 ? base.substring(0, dot) : base;
+      final extension = dot > 0 ? base.substring(dot) : '';
+      candidate = '$stem ($index)$extension';
+      index++;
+    }
+    _usedNames.add(candidate.toLowerCase());
+    return candidate;
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
+
+/// ສຳລັບ browser ທີ່ບໍ່ຮອງຮັບ directory picker: ດາວໂຫຼດແຕ່ລະໄຟລ໌ອັດຕະໂນມັດ.
+class _BlobBatchSinkFactory implements IncomingBatchSinkFactory {
+  @override
+  Future<IncomingFileSink> create(String fileName) async =>
+      _BlobIncomingFileSink(fileName);
+
+  @override
+  Future<void> dispose() async {}
 }
 
 class _BlobIncomingFileSink implements IncomingFileSink {

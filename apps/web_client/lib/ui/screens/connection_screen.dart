@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_config.dart';
 import '../../core/theme/yon_theme.dart';
 import '../../models/file_transfer_state.dart';
+import '../../models/incoming_batch_offer.dart';
 import '../../models/incoming_file_offer.dart';
 import '../../models/peer_device.dart';
 import '../../models/picked_file.dart';
@@ -21,6 +22,7 @@ class ConnectionScreen extends StatelessWidget {
     required this.self,
     required this.peer,
     required this.pendingOffers,
+    required this.pendingBatches,
     required this.transfers,
     required this.hasActiveTransfer,
     required this.connectionRoute,
@@ -30,6 +32,8 @@ class ConnectionScreen extends StatelessWidget {
     required this.onDisconnect,
     required this.onAccept,
     required this.onReject,
+    required this.onAcceptBatch,
+    required this.onRejectBatch,
     required this.onCancelTransfer,
     this.onSendText,
     this.showHistory = true,
@@ -38,6 +42,7 @@ class ConnectionScreen extends StatelessWidget {
   final PeerDevice self;
   final PeerDevice peer;
   final List<IncomingFileOffer> pendingOffers;
+  final List<IncomingBatchOffer> pendingBatches;
   final List<FileTransferState> transfers;
   final bool hasActiveTransfer;
   final String connectionRoute;
@@ -47,6 +52,8 @@ class ConnectionScreen extends StatelessWidget {
   final VoidCallback onDisconnect;
   final ValueChanged<String> onAccept;
   final ValueChanged<String> onReject;
+  final ValueChanged<String> onAcceptBatch;
+  final ValueChanged<String> onRejectBatch;
   final ValueChanged<String> onCancelTransfer;
   final VoidCallback? onSendText;
   final bool showHistory;
@@ -195,7 +202,7 @@ class ConnectionScreen extends StatelessWidget {
                 onDropRejected: onDropRejected,
               ),
             ],
-            if (pendingOffers.isNotEmpty) ...[
+            if (pendingBatches.isNotEmpty || pendingOffers.isNotEmpty) ...[
               const SizedBox(height: 24),
               Text(
                 'ໄຟລ໌ທີ່ລໍຖ້າຮັບ',
@@ -204,6 +211,12 @@ class ConnectionScreen extends StatelessWidget {
                 ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 10),
+              for (final batch in pendingBatches)
+                _IncomingBatchCard(
+                  batch: batch,
+                  onAccept: () => onAcceptBatch(batch.id),
+                  onReject: () => onRejectBatch(batch.id),
+                ),
               for (final offer in pendingOffers)
                 _IncomingOfferCard(
                   offer: offer,
@@ -492,6 +505,129 @@ class _ConnectionDevice extends StatelessWidget {
         const SizedBox(height: 3),
         PeerOsBadge(peer: peer),
       ],
+    );
+  }
+}
+
+class _IncomingBatchCard extends StatefulWidget {
+  const _IncomingBatchCard({
+    required this.batch,
+    required this.onAccept,
+    required this.onReject,
+  });
+
+  final IncomingBatchOffer batch;
+  final VoidCallback onAccept;
+  final VoidCallback onReject;
+
+  @override
+  State<_IncomingBatchCard> createState() => _IncomingBatchCardState();
+}
+
+class _IncomingBatchCardState extends State<_IncomingBatchCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final batch = widget.batch;
+    final files = batch.files;
+    final visibleFiles = _expanded ? files : files.take(3).toList();
+    final hiddenCount = files.length - visibleFiles.length;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.download_for_offline_rounded,
+                  color: YonTheme.yonOrange,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'ຈາກ ${batch.peerName} · ${batch.fileCount} ໄຟລ໌',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'ຂະໜາດລວມ ${FileTransferState.formatBytes(batch.totalBytes)}',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white60
+                    : Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 8),
+            for (final file in visibleFiles)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.insert_drive_file_outlined,
+                      size: 14,
+                      color: YonTheme.yonOrange,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        file.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    Text(
+                      FileTransferState.formatBytes(file.size),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white54
+                            : Colors.black45,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (hiddenCount > 0 || _expanded)
+              TextButton(
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () => setState(() => _expanded = !_expanded),
+                child: Text(
+                  _expanded ? 'ຫຍໍ້ລາຍການ' : 'ແລະອີກ $hiddenCount ໄຟລ໌',
+                ),
+              ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: widget.onReject,
+                  child: const Text('ປະຕິເສດ'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: widget.onAccept,
+                  icon: const Icon(Icons.check_rounded),
+                  label: Text('ຮັບທັງໝົດ (${batch.fileCount})'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

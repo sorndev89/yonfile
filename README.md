@@ -36,10 +36,10 @@
 | 2 | **ຂໍ້ຄວາມ** | ສົ່ງຂໍ້ຄວາມສັ້ນຜ່ານ DataChannel ດຽວກັນ (JSON `text`) |
 | 3 | **ຄົ້ນຫາ LAN ອັດຕະໂນມັດ** | ອຸປະກອນທີ່ມີ Public IP ດຽວກັນເຫັນກັນອັດຕະໂນມັດ |
 | 4 | **ຈັບຄູ່ຂ້າມເຄືອຂ່າຍ** | ລະຫັດຫ້ອງ PIN 6 ຕົວເລກ ຫຼື QR Code |
-| 5 | **ຫຼາຍໄຟລ໌** | ເລືອກຫຼາຍໄຟລ໌ໃນຄັ້ງດຽວ ສົ່ງແບບລຳດັບ |
+| 5 | **ຫຼາຍໄຟລ໌** | ເລືອກຫຼາຍໄຟລ໌ໃນຄັ້ງດຽວ ສົ່ງເປັນ batch ແບບລຳດັບ |
 | 6 | **ກວດສອບ SHA-256** | ກວດຄວາມຖືກຕ້ອງຂອງຂໍ້ມູນທັງສອງຝັ່ງ |
 | 7 | **ຄວາມຄືບໜ້າ + ຄວາມໄວ** | ແຖບເປີເຊັນ, ຄວາມໄວ MB/s, ຂະໜາດ / ສະຖານະ |
-| 8 | **ຍອມຮັບ / ປະຕິເສດ** | ຜູ້ຮັບຢືນຢັນກ່ອນໄຟລ໌ເລິ່ມສົ່ງ |
+| 8 | **ຍອມຮັບ / ປະຕິເສດ** | ຜູ້ຮັບຢືນຢັນຄັ້ງດຽວຕໍ່ batch (ບໍ່ຈຳກັດຈຳນວນໄຟລ໌) ກ່ອນເລີ່ມສົ່ງ |
 | 9 | **ຍົກເລີກໄດ້** | ຍົກເລີກກາງທາງ ທັງສອງຝັ່ງ |
 | 10 | **Drag & Drop** | ລາກໄຟລ໌ຈາກ OS ມາວາງ ຫຼື ວາງໃສ່ avatar ອຸປະກອນ |
 | 11 | **Radar View** | ວົງເຣດາສີສົ້ມແບບ Animation ສະແດງອຸປະກອນອ້ອມຕົວ |
@@ -76,19 +76,28 @@
 ## 3. ໂປຣໂຕຄໍການໂຍນໄຟລ໌
 
 ```text
-[Sender]                                                    [Receiver]
-   |--- 1. JSON {"type":"offer-file","id","name","size","mime"} ---->|
-   |<-- 2. JSON {"type":"accept-file","id"}  ຫຼື "reject-file" -------|
-   |--- 3. Binary chunks (64 KB, max 2 MB per window) -------------->|
-   |<-- 4. JSON {"type":"chunk-ack","id","received"} ---------------|
-   |--- 5. JSON {"type":"eof","id","sha256"} ----------------------->|
-   |<-- 6. JSON {"type":"transfer-complete","id","verified"} --------|
+[Sender]                                                         [Receiver]
+   |--- 1. JSON {"type":"offer-batch","id","files":[...]} ------------->|
+   |<-- 2. JSON {"type":"accept-batch","id"} ຫຼື "reject-batch" --------|
+   |       (ຕໍ່ໄປວົນຊ້ຳຕໍ່ໄຟລ໌ພາຍໃນ batch ທີ່ຍອມຮັບແລ້ວ)                 |
+   |--- 3. JSON {"type":"offer-file","id","name","size","mime","batchId"} ->|
+   |<-- 4. JSON {"type":"accept-file","id"}  (ອັດຕະໂນມັດ) ------------|
+   |--- 5. Binary chunks (64 KB, max 2 MB per window) ---------------->|
+   |<-- 6. JSON {"type":"chunk-ack","id","received"} -----------------|
+   |--- 7. JSON {"type":"eof","id","sha256"} ------------------------->|
+   |<-- 8. JSON {"type":"transfer-complete","id","verified"} ----------|
 ```
+
+> ໄຟລ໌ດຽວ (`files.length == 1`) ຍັງໃຊ້ `offer-file`/`accept-file` ແບບເກົ່າ
+> ເພື່ອຮັກສາຄວາມເຂົ້າກັນກັບ client ເວີຊັນກ່ອນ.
 
 | ຂໍ້ຄວາມ | ທິດທາງ | ໜ້າທີ່ |
 | :-- | :-- | :-- |
-| `offer-file` | Sender → Receiver | ສະເໜີສົ່ງໄຟລ໌ (id, name, size, mime) |
-| `accept-file` | Receiver → Sender | ຍອມຮັບ |
+| `offer-batch` | Sender → Receiver | ສະເໜີສົ່ງຫຼາຍໄຟລ໌ໃນຄັ້ງດຽວ (id, files[]) |
+| `accept-batch` | Receiver → Sender | ຍອມຮັບ batch ທັງໝົດ |
+| `reject-batch` | Receiver → Sender | ປະຕິເສດ batch ທັງໝົດ |
+| `offer-file` | Sender → Receiver | ສະເໜີສົ່ງໄຟລ໌ (id, name, size, mime, batchId?) |
+| `accept-file` | Receiver → Sender | ຍອມຮັບ (ອັດຕະໂນມັດເມື່ອຢູ່ໃນ batch) |
 | `reject-file` | Receiver → Sender | ປະຕິເສດ / ໄຟລ໌ໃຫຍ່ເກີນ / ຊ່ອງບໍ່ຫວ່າງ |
 | *(binary)* | Sender → Receiver | ຕ່ອນຂໍ້ມູນ 64 KB |
 | `chunk-ack` | Receiver → Sender | ຢືນຢັນ bytes ຫຼັງຂຽນລົງ storage ທຸກ 2 MB |

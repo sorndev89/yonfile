@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/constants/app_config.dart';
 import '../models/file_transfer_state.dart';
+import '../models/incoming_batch_offer.dart';
 import '../models/incoming_file_offer.dart';
 import '../models/peer_device.dart';
 import '../models/picked_file.dart';
@@ -21,8 +22,11 @@ class FileTransferController extends ChangeNotifier {
     required WebRtcService webrtc,
     required String Function(String peerId) peerName,
     this.onIncomingText,
+    Future<IncomingBatchSinkFactory?> Function()? batchSinkFactoryProvider,
   }) : _webrtc = webrtc,
-       _peerName = peerName {
+       _peerName = peerName,
+       _batchSinkFactoryProvider =
+           batchSinkFactoryProvider ?? createIncomingBatchSinkFactory {
     _messageSubscription = _webrtc.messages.listen(handlePeerMessage);
     _historyReady = _restoreHistory();
   }
@@ -32,12 +36,14 @@ class FileTransferController extends ChangeNotifier {
   final WebRtcService _webrtc;
   final String Function(String peerId) _peerName;
   final void Function(String peerId, String text)? onIncomingText;
+  final Future<IncomingBatchSinkFactory?> Function() _batchSinkFactoryProvider;
   final FileChunkerService _chunker = FileChunkerService();
   final math.Random _random = math.Random.secure();
 
   final List<FileTransferState> _transfers = [];
   final Map<String, Uint8List> _outgoingBytes = {};
   final Map<String, Completer<bool>> _pendingAccepts = {};
+  final Map<String, Completer<bool>> _pendingBatchAccepts = {};
   final Map<String, Completer<bool>> _pendingCompletions = {};
   final Set<String> _sending = {};
   final Map<String, IncomingFile> _incoming = {};
@@ -48,6 +54,11 @@ class FileTransferController extends ChangeNotifier {
   final Map<String, String> _activeIncomingId = {};
   final Map<String, String> _transferPeers = {};
   final Map<String, IncomingFileOffer> _pendingIncomingOffers = {};
+  final Map<String, IncomingBatchOffer> _pendingIncomingBatches = {};
+  final Map<String, IncomingBatchSinkFactory> _batchSinkFactories = {};
+  final Map<String, Set<String>> _batchFileIds = {};
+  final Map<String, String> _fileBatches = {};
+  final Map<String, int> _batchRemaining = {};
   final Set<String> _cancelled = {};
   final Map<String, int> _lastIncomingUiMs = {};
   static const int _ackWindowBytes = 2 * 1024 * 1024;
@@ -60,11 +71,17 @@ class FileTransferController extends ChangeNotifier {
   List<FileTransferState> get transfers => UnmodifiableListView(_transfers);
   Map<String, IncomingFileOffer> get pendingIncomingOffers =>
       Map.unmodifiable(_pendingIncomingOffers);
+  Map<String, IncomingBatchOffer> get pendingIncomingBatches =>
+      Map.unmodifiable(_pendingIncomingBatches);
   int get incomingReservedBytes =>
       _incoming.values.fold(0, (total, file) => total + file.fileSize);
   int get _pendingOfferBytes => _pendingIncomingOffers.values.fold(
     0,
     (total, offer) => total + offer.fileSize,
+  );
+  int get _pendingBatchBytes => _pendingIncomingBatches.values.fold(
+    0,
+    (total, batch) => total + batch.totalBytes,
   );
 
   List<FileTransferState> transfersForPeer(String peerId, String peerName) =>
@@ -74,7 +91,12 @@ class FileTransferController extends ChangeNotifier {
                 transfer.peerId == peerId ||
                 (transfer.peerId == null && transfer.peerName == peerName) ||
                 _transferPeers[transfer.id] == peerId ||
-                _pendingIncomingOffers[transfer.id]?.peerId == peerId,
+                _pendingIncomingOffers[transfer.id]?.peerId == peerId ||
+                _pendingIncomingBatches.values.any(
+                  (batch) =>
+                      batch.peerId == peerId &&
+                      batch.files.any((file) => file.id == transfer.id),
+                ),
           )
           .toList();
 
@@ -82,25 +104,113 @@ class FileTransferController extends ChangeNotifier {
     (transfer) =>
         transfer.isActive &&
         (_transferPeers[transfer.id] == peerId ||
-            _pendingIncomingOffers[transfer.id]?.peerId == peerId),
+            _pendingIncomingOffers[transfer.id]?.peerId == peerId ||
+            _pendingIncomingBatches.values.any(
+              (batch) => batch.peerId == peerId,
+            )),
   );
 
   Future<void> sendFiles(PeerDevice peer, List<PickedFile> files) async {
-    for (final file in files) {
-      await _sendSingleFile(peer, file);
+    if (files.length <= 1) {
+      for (final file in files) {
+        await _sendSingleFile(peer, file);
+      }
+      return;
+    }
+    await _sendBatch(peer, files);
+  }
+
+  /// ສົ່ງຫຼາຍໄຟລ໌ເປັນ batch: ຜູ້ຮັບກົດຍອມຮັບພຽງຄັ້ງດຽວ ແລ້ວໄຟລ໌ທັງໝົດ
+  /// ຈະຖືກຮັບແບບອັດຕະໂນມັດ (ຍັງສົ່ງທີລະໄຟລ໌ເພື່ອຄວບຄຸມ backpressure).
+  Future<void> _sendBatch(PeerDevice peer, List<PickedFile> files) async {
+    final batchId = _generateId();
+    final entries = [for (final file in files) (id: _generateId(), file: file)];
+    final completer = Completer<bool>();
+    _pendingBatchAccepts[batchId] = completer;
+
+    for (final entry in entries) {
+      _sending.add(entry.id);
+      _transferPeers[entry.id] = peer.id;
+      _upsertTransfer(
+        FileTransferState(
+          id: entry.id,
+          fileName: entry.file.name,
+          fileSize: entry.file.size,
+          direction: TransferDirection.send,
+          peerName: peer.name,
+          peerId: peer.id,
+          status: TransferStatus.awaitingAccept,
+          startedAt: DateTime.now(),
+        ),
+      );
+    }
+
+    try {
+      await _webrtc.sendText(
+        peer.id,
+        jsonEncode({
+          'type': 'offer-batch',
+          'id': batchId,
+          'files': [
+            for (final entry in entries)
+              {
+                'id': entry.id,
+                'name': entry.file.name,
+                'size': entry.file.size,
+                'mime': entry.file.mimeType,
+              },
+          ],
+        }),
+      );
+      final accepted = await completer.future.timeout(
+        const Duration(minutes: 5),
+        onTimeout: () => false,
+      );
+      if (!accepted) {
+        for (final entry in entries) {
+          _updateTransfer(
+            entry.id,
+            (transfer) => transfer.copyWith(status: TransferStatus.cancelled),
+          );
+          _sending.remove(entry.id);
+          _transferPeers.remove(entry.id);
+        }
+        return;
+      }
+
+      for (final entry in entries) {
+        await _sendSingleFile(peer, entry.file, id: entry.id, batchId: batchId);
+      }
+    } catch (error) {
+      for (final entry in entries) {
+        _updateTransfer(
+          entry.id,
+          (transfer) =>
+              transfer.copyWith(status: TransferStatus.failed, error: '$error'),
+        );
+        _sending.remove(entry.id);
+        _transferPeers.remove(entry.id);
+      }
+    } finally {
+      _pendingBatchAccepts.remove(batchId);
     }
   }
 
-  Future<void> _sendSingleFile(PeerDevice peer, PickedFile file) async {
-    final id = _generateId();
+  Future<void> _sendSingleFile(
+    PeerDevice peer,
+    PickedFile file, {
+    String? id,
+    String? batchId,
+  }) async {
+    final transferId = id ?? _generateId();
     final completer = Completer<bool>();
-    _pendingAccepts[id] = completer;
-    if (file.bytes != null) _outgoingBytes[id] = file.bytes!;
-    _sending.add(id);
-    _transferPeers[id] = peer.id;
+    _pendingAccepts[transferId] = completer;
+    if (file.bytes != null) _outgoingBytes[transferId] = file.bytes!;
+    _sending.add(transferId);
+    _transferPeers[transferId] = peer.id;
     _upsertTransfer(
       FileTransferState(
-        id: id,
+        id: transferId,
         fileName: file.name,
         fileSize: file.size,
         direction: TransferDirection.send,
@@ -116,10 +226,11 @@ class FileTransferController extends ChangeNotifier {
         peer.id,
         jsonEncode({
           'type': 'offer-file',
-          'id': id,
+          'id': transferId,
           'name': file.name,
           'size': file.size,
           'mime': file.mimeType,
+          'batchId': ?batchId,
         }),
       );
       final accepted = await completer.future.timeout(
@@ -128,14 +239,14 @@ class FileTransferController extends ChangeNotifier {
       );
       if (!accepted) {
         _updateTransfer(
-          id,
+          transferId,
           (t) => t.copyWith(status: TransferStatus.cancelled),
         );
         return;
       }
 
       _updateTransfer(
-        id,
+        transferId,
         (t) => t.copyWith(status: TransferStatus.transferring),
       );
       final stopwatch = Stopwatch()..start();
@@ -146,7 +257,7 @@ class FileTransferController extends ChangeNotifier {
           lastUiMs = nowMs;
           final seconds = nowMs / 1000.0;
           _updateTransfer(
-            id,
+            transferId,
             (t) => t.copyWith(
               transferred: sent,
               bytesPerSecond: seconds > 0.2 ? sent / seconds : 0,
@@ -159,20 +270,23 @@ class FileTransferController extends ChangeNotifier {
           ? await _chunker.sendStream(
               stream: file.readStream!,
               expectedSize: file.size,
-              sendChunk: (chunk) => _sendBinaryChunk(id, peer.id, chunk),
+              sendChunk: (chunk) =>
+                  _sendBinaryChunk(transferId, peer.id, chunk),
               bufferedAmount: () => _webrtc.bufferedAmount(peer.id),
               onProgress: onProgress,
-              isCancelled: () => _cancelled.contains(id),
+              isCancelled: () => _cancelled.contains(transferId),
               isChannelOpen: () => _webrtc.isOpen(peer.id),
             )
-          : await _sendBytesWithProgress(id, peer, file, onProgress);
-      await _flushSendWindow(id, peer.id);
-      if (_cancelled.contains(id)) throw const TransferCancelledException();
-      _updateTransfer(id, (t) => t.copyWith(sha256: sha));
+          : await _sendBytesWithProgress(transferId, peer, file, onProgress);
+      await _flushSendWindow(transferId, peer.id);
+      if (_cancelled.contains(transferId)) {
+        throw const TransferCancelledException();
+      }
+      _updateTransfer(transferId, (t) => t.copyWith(sha256: sha));
       final completion = Completer<bool>();
-      _pendingCompletions[id] = completion;
+      _pendingCompletions[transferId] = completion;
       _updateTransfer(
-        id,
+        transferId,
         (t) => t.copyWith(
           status: TransferStatus.verifying,
           transferred: file.size,
@@ -180,7 +294,7 @@ class FileTransferController extends ChangeNotifier {
       );
       await _webrtc.sendText(
         peer.id,
-        jsonEncode({'type': 'eof', 'id': id, 'sha256': sha}),
+        jsonEncode({'type': 'eof', 'id': transferId, 'sha256': sha}),
       );
       final completed = await completion.future.timeout(
         const Duration(seconds: 90),
@@ -188,7 +302,7 @@ class FileTransferController extends ChangeNotifier {
       );
       if (!completed) {
         _updateTransfer(
-          id,
+          transferId,
           (t) => t.copyWith(
             status: TransferStatus.failed,
             error: 'ບໍ່ໄດ້ຮັບຄຳຢືນຢັນຈາກອຸປະກອນປາຍທາງ',
@@ -196,11 +310,14 @@ class FileTransferController extends ChangeNotifier {
         );
       }
     } on TransferCancelledException {
-      _updateTransfer(id, (t) => t.copyWith(status: TransferStatus.cancelled));
+      _updateTransfer(
+        transferId,
+        (t) => t.copyWith(status: TransferStatus.cancelled),
+      );
       if (_webrtc.isOpen(peer.id)) {
         await _webrtc.sendText(
           peer.id,
-          jsonEncode({'type': 'cancel-file', 'id': id}),
+          jsonEncode({'type': 'cancel-file', 'id': transferId}),
         );
       }
     } catch (error) {
@@ -208,12 +325,12 @@ class FileTransferController extends ChangeNotifier {
         try {
           await _webrtc.sendText(
             peer.id,
-            jsonEncode({'type': 'cancel-file', 'id': id}),
+            jsonEncode({'type': 'cancel-file', 'id': transferId}),
           );
         } catch (_) {}
       }
       _updateTransfer(
-        id,
+        transferId,
         (t) => t.copyWith(
           status: TransferStatus.failed,
           error: error is TransferStalledException
@@ -222,17 +339,18 @@ class FileTransferController extends ChangeNotifier {
         ),
       );
     } finally {
-      _outgoingBytes.remove(id);
-      _sending.remove(id);
+      _outgoingBytes.remove(transferId);
+      _sending.remove(transferId);
       final waitingForCompletion = _transfers.any(
         (transfer) =>
-            transfer.id == id && transfer.status == TransferStatus.verifying,
+            transfer.id == transferId &&
+            transfer.status == TransferStatus.verifying,
       );
-      if (!waitingForCompletion) _transferPeers.remove(id);
-      _cancelled.remove(id);
-      _pendingAccepts.remove(id);
-      _pendingCompletions.remove(id);
-      _chunkAckStates.remove(id);
+      if (!waitingForCompletion) _transferPeers.remove(transferId);
+      _cancelled.remove(transferId);
+      _pendingAccepts.remove(transferId);
+      _pendingCompletions.remove(transferId);
+      _chunkAckStates.remove(transferId);
     }
   }
 
@@ -330,6 +448,16 @@ class FileTransferController extends ChangeNotifier {
     }
 
     switch (data['type']) {
+      case 'offer-batch':
+        _onOfferBatch(message.peerId, data);
+      case 'accept-batch':
+        final id = data['id'];
+        final pending = id is String ? _pendingBatchAccepts[id] : null;
+        if (pending != null && !pending.isCompleted) pending.complete(true);
+      case 'reject-batch':
+        final id = data['id'];
+        final pending = id is String ? _pendingBatchAccepts[id] : null;
+        if (pending != null && !pending.isCompleted) pending.complete(false);
       case 'offer-file':
         _onOfferFile(message.peerId, data);
       case 'accept-file':
@@ -366,6 +494,24 @@ class FileTransferController extends ChangeNotifier {
       (offer) => offer.peerId == peerId,
     )) {
       if (!offer.response.isCompleted) offer.response.complete(false);
+    }
+    for (final offer
+        in _pendingIncomingBatches.values
+            .where((offer) => offer.peerId == peerId)
+            .toList()) {
+      if (!offer.response.isCompleted) offer.response.complete(false);
+      _pendingIncomingBatches.remove(offer.id);
+    }
+    for (final entry in _batchFileIds.entries.toList()) {
+      if (entry.value.any((id) => _transferPeers[id] == peerId)) {
+        _batchFileIds.remove(entry.key);
+        _batchRemaining.remove(entry.key);
+        for (final id in entry.value) {
+          _fileBatches.remove(id);
+        }
+        final factory = _batchSinkFactories.remove(entry.key);
+        if (factory != null) unawaited(factory.dispose());
+      }
     }
     for (final entry in _preparedSinks.entries.toList()) {
       if (_pendingIncomingOffers[entry.key]?.peerId == peerId) {
@@ -420,8 +566,176 @@ class FileTransferController extends ChangeNotifier {
     }
   }
 
+  Future<void> _onOfferBatch(String peerId, Map<String, dynamic> data) async {
+    final batchId = data['id'] is String ? data['id'] as String : '';
+    final rawFiles = data['files'];
+    final peerName = _peerName(peerId);
+    String? rejectionReason;
+    final files = <IncomingBatchFile>[];
+
+    if (batchId.isEmpty ||
+        batchId.length > 80 ||
+        rawFiles is! List ||
+        rawFiles.isEmpty) {
+      rejectionReason = 'ຂໍ້ມູນໄຟລ໌ບໍ່ຄົບຖ້ວນ';
+    } else {
+      final seenIds = <String>{};
+      for (final raw in rawFiles) {
+        if (raw is! Map) {
+          rejectionReason = 'ຂໍ້ມູນໄຟລ໌ບໍ່ຄົບຖ້ວນ';
+          break;
+        }
+        final id = raw['id'] is String ? raw['id'] as String : '';
+        final rawName = raw['name'] is String ? raw['name'] as String : 'file';
+        final name = rawName
+            .replaceAll(RegExp(r'[\\/\u0000-\u001f]'), '_')
+            .trim();
+        final size = raw['size'] is num ? (raw['size'] as num).toInt() : -1;
+        final mime = raw['mime'] is String
+            ? raw['mime'] as String
+            : 'application/octet-stream';
+        if (id.isEmpty ||
+            id.length > 80 ||
+            name.isEmpty ||
+            name.length > 255 ||
+            size < 0 ||
+            !seenIds.add(id)) {
+          rejectionReason = 'ຂໍ້ມູນໄຟລ໌ບໍ່ຄົບຖ້ວນ';
+          break;
+        }
+        files.add(
+          IncomingBatchFile(id: id, name: name, size: size, mime: mime),
+        );
+      }
+    }
+
+    final totalBytes = files.fold<int>(0, (total, file) => total + file.size);
+    if (rejectionReason == null) {
+      if (totalBytes > AppConfig.maxFileSizeBytes ||
+          incomingReservedBytes +
+                  _pendingOfferBytes +
+                  _pendingBatchBytes +
+                  totalBytes >
+              AppConfig.maxFileSizeBytes) {
+        rejectionReason = 'ໄຟລ໌ໃຫຍ່ເກີນຂີດຈຳກັດ';
+      } else if (_activeIncomingId.containsKey(peerId) ||
+          _pendingIncomingOffers.values.any(
+            (offer) => offer.peerId == peerId,
+          ) ||
+          _batchFileIds.entries.any(
+            (entry) => entry.value.any((id) => _transferPeers[id] == peerId),
+          )) {
+        rejectionReason = 'ມີການຮັບໄຟລ໌ອື່ນຄ້າງຢູ່';
+      }
+    }
+
+    if (rejectionReason != null) {
+      for (final file in files) {
+        _upsertTransfer(
+          FileTransferState(
+            id: file.id,
+            fileName: file.name,
+            fileSize: file.size,
+            direction: TransferDirection.receive,
+            peerName: peerName,
+            peerId: peerId,
+            status: TransferStatus.failed,
+            error: rejectionReason,
+            startedAt: DateTime.now(),
+          ),
+        );
+      }
+      if (_webrtc.isOpen(peerId)) {
+        await _webrtc.sendText(
+          peerId,
+          jsonEncode({'type': 'reject-batch', 'id': batchId}),
+        );
+      }
+      return;
+    }
+    if (_pendingIncomingBatches.containsKey(batchId)) return;
+
+    final offer = IncomingBatchOffer(
+      id: batchId,
+      peerId: peerId,
+      peerName: peerName,
+      files: files,
+    );
+    _pendingIncomingBatches[batchId] = offer;
+    for (final file in files) {
+      _transferPeers[file.id] = peerId;
+      _upsertTransfer(
+        FileTransferState(
+          id: file.id,
+          fileName: file.name,
+          fileSize: file.size,
+          direction: TransferDirection.receive,
+          peerName: peerName,
+          peerId: peerId,
+          status: TransferStatus.offering,
+          startedAt: DateTime.now(),
+        ),
+      );
+    }
+
+    final accepted = await offer.response.future.timeout(
+      const Duration(minutes: 5),
+      onTimeout: () => false,
+    );
+    _pendingIncomingBatches.remove(batchId);
+    if (!accepted) {
+      final factory = _batchSinkFactories.remove(batchId);
+      if (factory != null) unawaited(factory.dispose());
+      for (final file in files) {
+        _updateTransfer(
+          file.id,
+          (transfer) => transfer.copyWith(status: TransferStatus.cancelled),
+        );
+        _transferPeers.remove(file.id);
+      }
+      if (_webrtc.isOpen(peerId)) {
+        await _webrtc.sendText(
+          peerId,
+          jsonEncode({'type': 'reject-batch', 'id': batchId}),
+        );
+      }
+      return;
+    }
+
+    if (!_webrtc.isOpen(peerId)) {
+      final factory = _batchSinkFactories.remove(batchId);
+      if (factory != null) unawaited(factory.dispose());
+      _batchFileIds.remove(batchId);
+      _batchRemaining.remove(batchId);
+      for (final file in files) {
+        _fileBatches.remove(file.id);
+        _updateTransfer(
+          file.id,
+          (transfer) => transfer.copyWith(
+            status: TransferStatus.failed,
+            error: 'ການເຊື່ອມຕໍ່ຖືກຕັດກ່ອນເລີ່ມຮັບໄຟລ໌',
+          ),
+        );
+      }
+      return;
+    }
+    await _webrtc.sendText(
+      peerId,
+      jsonEncode({'type': 'accept-batch', 'id': batchId}),
+    );
+    _batchFileIds[batchId] = files.map((file) => file.id).toSet();
+    _batchRemaining[batchId] = files.length;
+    for (final file in files) {
+      _fileBatches[file.id] = batchId;
+    }
+  }
+
   Future<void> _onOfferFile(String peerId, Map<String, dynamic> data) async {
     final id = data['id'] is String ? data['id'] as String : '';
+    final rawBatchId = data['batchId'];
+    final batchId = rawBatchId is String ? rawBatchId : null;
+    final isBatchFile =
+        batchId != null && _batchFileIds[batchId]?.contains(id) == true;
     final rawName = data['name'] is String ? data['name'] as String : 'file';
     final name = rawName.replaceAll(RegExp(r'[\\/\u0000-\u001f]'), '_').trim();
     final size = data['size'] is num ? (data['size'] as num).toInt() : -1;
@@ -433,13 +747,23 @@ class FileTransferController extends ChangeNotifier {
         name.length > 255 ||
         size < 0) {
       rejectionReason = 'ຂໍ້ມູນໄຟລ໌ບໍ່ຄົບຖ້ວນ';
-    } else if (size > AppConfig.maxFileSizeBytes ||
-        incomingReservedBytes + _pendingOfferBytes + size >
-            AppConfig.maxFileSizeBytes ||
-        _pendingIncomingOffers.length >= 4) {
+    } else if (size > AppConfig.maxFileSizeBytes) {
+      rejectionReason = 'ໄຟລ໌ໃຫຍ່ເກີນຂີດຈຳກັດ';
+    } else if (isBatchFile && _transferPeers[id] != peerId) {
+      rejectionReason = 'ຂໍ້ມູນໄຟລ໌ບໍ່ຄົບຖ້ວນ';
+    } else if (!isBatchFile &&
+        (incomingReservedBytes +
+                    _pendingOfferBytes +
+                    _pendingBatchBytes +
+                    size >
+                AppConfig.maxFileSizeBytes ||
+            _pendingIncomingOffers.length >= 4)) {
       rejectionReason = 'ໄຟລ໌ໃຫຍ່ເກີນຂີດຈຳກັດ';
     } else if (_activeIncomingId.containsKey(peerId) ||
-        _pendingIncomingOffers.values.any((offer) => offer.peerId == peerId)) {
+        (!isBatchFile &&
+            _pendingIncomingOffers.values.any(
+              (offer) => offer.peerId == peerId,
+            ))) {
       rejectionReason = 'ມີການຮັບໄຟລ໌ອື່ນຄ້າງຢູ່';
     }
     if (rejectionReason != null) {
@@ -458,6 +782,7 @@ class FileTransferController extends ChangeNotifier {
           ),
         );
       }
+      if (isBatchFile) _completeBatchFile(id);
       if (_webrtc.isOpen(peerId)) {
         await _webrtc.sendText(
           peerId,
@@ -466,6 +791,37 @@ class FileTransferController extends ChangeNotifier {
       }
       return;
     }
+
+    if (isBatchFile) {
+      final factory = _batchSinkFactories[batchId];
+      if (factory == null) {
+        await _rejectIncomingFile(peerId, id, 'ບໍ່ສາມາດເປີດບ່ອນບັນທຶກໄຟລ໌ໄດ້');
+        return;
+      }
+      IncomingFileSink sink;
+      try {
+        sink = await factory.create(name);
+      } catch (error) {
+        debugPrint('Unable to prepare incoming batch file: $error');
+        await _rejectIncomingFile(peerId, id, 'ບໍ່ສາມາດເປີດບ່ອນບັນທຶກໄຟລ໌ໄດ້');
+        return;
+      }
+      if (!_webrtc.isOpen(peerId)) {
+        await sink.abort();
+        _updateTransfer(
+          id,
+          (transfer) => transfer.copyWith(
+            status: TransferStatus.failed,
+            error: 'ການເຊື່ອມຕໍ່ຖືກຕັດກ່ອນເລີ່ມຮັບໄຟລ໌',
+          ),
+        );
+        _completeBatchFile(id);
+        return;
+      }
+      await _activateIncoming(peerId, id, name, size, peerName, sink);
+      return;
+    }
+
     if (_pendingIncomingOffers.containsKey(id)) return;
 
     final offer = IncomingFileOffer(
@@ -515,6 +871,17 @@ class FileTransferController extends ChangeNotifier {
       );
       return;
     }
+    await _activateIncoming(peerId, id, name, size, peerName, sink);
+  }
+
+  Future<void> _activateIncoming(
+    String peerId,
+    String id,
+    String name,
+    int size,
+    String peerName,
+    IncomingFileSink sink,
+  ) async {
     _incoming[id] = IncomingFile(
       id: id,
       fileName: name,
@@ -541,17 +908,54 @@ class FileTransferController extends ChangeNotifier {
         peerId,
         jsonEncode({'type': 'accept-file', 'id': id}),
       );
-    } else {
-      _incoming.remove(id);
-      _activeIncomingId.remove(peerId);
-      _transferPeers.remove(id);
-      _updateTransfer(
-        id,
-        (t) => t.copyWith(
-          status: TransferStatus.failed,
-          error: 'ການເຊື່ອມຕໍ່ຖືກຕັດກ່ອນເລີ່ມຮັບໄຟລ໌',
-        ),
+      return;
+    }
+    _incoming.remove(id);
+    _activeIncomingId.remove(peerId);
+    _transferPeers.remove(id);
+    await sink.abort();
+    _updateTransfer(
+      id,
+      (t) => t.copyWith(
+        status: TransferStatus.failed,
+        error: 'ການເຊື່ອມຕໍ່ຖືກຕັດກ່ອນເລີ່ມຮັບໄຟລ໌',
+      ),
+    );
+    _completeBatchFile(id);
+  }
+
+  Future<void> _rejectIncomingFile(
+    String peerId,
+    String id,
+    String error,
+  ) async {
+    _updateTransfer(
+      id,
+      (transfer) =>
+          transfer.copyWith(status: TransferStatus.failed, error: error),
+    );
+    _completeBatchFile(id);
+    if (_webrtc.isOpen(peerId)) {
+      await _webrtc.sendText(
+        peerId,
+        jsonEncode({'type': 'reject-file', 'id': id}),
       );
+    }
+  }
+
+  void _completeBatchFile(String fileId) {
+    final batchId = _fileBatches.remove(fileId);
+    if (batchId == null) return;
+    final ids = _batchFileIds[batchId];
+    if (ids == null) return;
+    ids.remove(fileId);
+    final remaining = (_batchRemaining[batchId] ?? ids.length + 1) - 1;
+    _batchRemaining[batchId] = remaining < 0 ? 0 : remaining;
+    if (ids.isEmpty) {
+      _batchFileIds.remove(batchId);
+      _batchRemaining.remove(batchId);
+      final factory = _batchSinkFactories.remove(batchId);
+      if (factory != null) unawaited(factory.dispose());
     }
   }
 
@@ -641,6 +1045,7 @@ class FileTransferController extends ChangeNotifier {
       id,
       (t) => t.copyWith(status: TransferStatus.failed, error: error),
     );
+    _completeBatchFile(id);
     if (_webrtc.isOpen(peerId)) {
       await _webrtc.sendText(
         peerId,
@@ -701,6 +1106,7 @@ class FileTransferController extends ChangeNotifier {
     _lastIncomingUiMs.remove(id);
     _activeIncomingId.remove(peerId);
     _transferPeers.remove(id);
+    _completeBatchFile(id);
   }
 
   void _onIncomingStalled(String peerId, String id) {
@@ -717,6 +1123,7 @@ class FileTransferController extends ChangeNotifier {
         error: 'ບໍ່ໄດ້ຮັບຂໍ້ມູນເພີ່ມເກີນ 45 ວິນາທີ ກະລຸນາລອງໃໝ່',
       ),
     );
+    _completeBatchFile(id);
     if (_webrtc.isOpen(peerId)) {
       _webrtc.sendText(peerId, jsonEncode({'type': 'cancel-file', 'id': id}));
     }
@@ -778,6 +1185,7 @@ class FileTransferController extends ChangeNotifier {
       _activeIncomingId.remove(peerId);
     }
     _updateTransfer(id, (t) => t.copyWith(status: TransferStatus.cancelled));
+    _completeBatchFile(id);
   }
 
   Future<void> acceptIncomingOffer(String id) async {
@@ -801,6 +1209,39 @@ class FileTransferController extends ChangeNotifier {
 
   void rejectIncomingOffer(String id) {
     final offer = _pendingIncomingOffers[id];
+    if (offer != null && !offer.response.isCompleted) {
+      offer.response.complete(false);
+    }
+  }
+
+  Future<void> acceptIncomingBatch(String id) async {
+    final offer = _pendingIncomingBatches[id];
+    if (offer == null || offer.response.isCompleted) return;
+    try {
+      final factory = await _batchSinkFactoryProvider();
+      if (factory == null) {
+        if (!offer.response.isCompleted) offer.response.complete(false);
+        return;
+      }
+      if (offer.response.isCompleted || _pendingIncomingBatches[id] != offer) {
+        await factory.dispose();
+        return;
+      }
+      _batchSinkFactories[id] = factory;
+      _batchFileIds[id] = offer.files.map((file) => file.id).toSet();
+      _batchRemaining[id] = offer.files.length;
+      for (final file in offer.files) {
+        _fileBatches[file.id] = id;
+      }
+      offer.response.complete(true);
+    } catch (error) {
+      debugPrint('Unable to prepare incoming batch: $error');
+      if (!offer.response.isCompleted) offer.response.complete(false);
+    }
+  }
+
+  void rejectIncomingBatch(String id) {
+    final offer = _pendingIncomingBatches[id];
     if (offer != null && !offer.response.isCompleted) {
       offer.response.complete(false);
     }
@@ -840,6 +1281,7 @@ class FileTransferController extends ChangeNotifier {
       }
       if (_activeIncomingId[peerId] == id) _activeIncomingId.remove(peerId);
     }
+    _completeBatchFile(id);
   }
 
   void clearCompleted() {
@@ -943,7 +1385,11 @@ class FileTransferController extends ChangeNotifier {
     for (final sink in _preparedSinks.values) {
       unawaited(sink.abort());
     }
+    for (final factory in _batchSinkFactories.values) {
+      unawaited(factory.dispose());
+    }
     _incoming.clear();
+    _batchSinkFactories.clear();
     _sending.clear();
     _messageSubscription.cancel();
     revision.dispose();

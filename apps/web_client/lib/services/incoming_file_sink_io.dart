@@ -14,6 +14,18 @@ Future<IncomingFileSink> createIncomingFileSink(String fileName) async {
   return _IoIncomingFileSink(dir, file, output);
 }
 
+Future<IncomingBatchSinkFactory?> createIncomingBatchSinkFactory() async =>
+    _TempBatchSinkFactory();
+
+class _TempBatchSinkFactory implements IncomingBatchSinkFactory {
+  @override
+  Future<IncomingFileSink> create(String fileName) =>
+      createIncomingFileSink(fileName);
+
+  @override
+  Future<void> dispose() async {}
+}
+
 class _IoIncomingFileSink implements IncomingFileSink {
   _IoIncomingFileSink(this.directory, this.file, this.output);
 

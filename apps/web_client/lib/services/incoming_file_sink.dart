@@ -10,5 +10,15 @@ abstract interface class IncomingFileSink {
   Future<void> abort();
 }
 
+/// ສ້າງ sink ສຳລັບໄຟລ໌ໃນ batch ດ້ວຍການເລືອກປາຍທາງພຽງຄັ້ງດຽວ.
+abstract interface class IncomingBatchSinkFactory {
+  Future<IncomingFileSink> create(String fileName);
+
+  Future<void> dispose();
+}
+
 Future<IncomingFileSink> createIncomingFileSink(String fileName) =>
     impl.createIncomingFileSink(fileName);
+
+Future<IncomingBatchSinkFactory?> createIncomingBatchSinkFactory() =>
+    impl.createIncomingBatchSinkFactory();

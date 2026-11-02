@@ -1194,6 +1194,9 @@ class _HomeScreenState extends State<HomeScreen> {
       pendingOffers: _fileTransfers.pendingIncomingOffers.values
           .where((offer) => offer.peerId == peer.id)
           .toList(),
+      pendingBatches: _fileTransfers.pendingIncomingBatches.values
+          .where((batch) => batch.peerId == peer.id)
+          .toList(),
       transfers: transfers,
       hasActiveTransfer: _fileTransfers.hasActiveTransferForPeer(peer.id),
       connectionRoute: _connectionRoutes[peer.id] ?? 'unknown',
@@ -1204,6 +1207,8 @@ class _HomeScreenState extends State<HomeScreen> {
       onSendText: () => _sendTextMessage(peer),
       onAccept: _fileTransfers.acceptIncomingOffer,
       onReject: _fileTransfers.rejectIncomingOffer,
+      onAcceptBatch: _fileTransfers.acceptIncomingBatch,
+      onRejectBatch: _fileTransfers.rejectIncomingBatch,
       onCancelTransfer: _fileTransfers.cancelTransfer,
       showHistory: MediaQuery.sizeOf(context).width < 600,
     );
