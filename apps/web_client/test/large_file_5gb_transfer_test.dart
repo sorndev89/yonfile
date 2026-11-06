@@ -17,7 +17,6 @@ class _MockHuge5GbFile {
 
   Stream<Uint8List> openRead([int? start, int? end]) async* {
     openReadCallCount++;
-    final s = start ?? 0;
     final e = end ?? totalSize;
     lastRequestedEnd = e;
     // ສົ່ງ bytes ຂະໜາດນ້ອຍເພື່ອທົດສອບ range logic ໂດຍບໍ່ໃຫ້ RAM ເຕັມ

@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import 'package:flutter/foundation.dart';
+
 import '../core/constants/app_config.dart';
 import 'incoming_file_sink.dart';
 
@@ -108,13 +110,15 @@ class FileChunkerService {
     required bool Function() isCancelled,
     required bool Function() isChannelOpen,
   }) async {
+    // ແນວທາງການສົ່ງຟາຍໂດຍຜະລິດຜົນຜະລິດອາການໃຊ້ Platform ໂດຍສັບຜອດພາບຂອງ chunkSize
     var offset = 0;
     var lastDrain = DateTime.now();
+    // ຊ່ວງເວລາກວດສະແດງຊ່ວຍການກວດແບບປັບວ່າຄ່າ buffer ສູງກວ່າຈຳນວນທີ່ອະນຸຍາດ
     while (offset < bytes.length) {
       if (isCancelled()) throw const TransferCancelledException();
       if (!isChannelOpen()) throw const TransferStalledException();
 
-      // ລໍຖ້າໃຫ້ Buffer ຫຼຸດລົງກ່ອນ (ປ້ອງກັນ browser/ອຸປະກອນຄ້າງ).
+      // Back‑pressure control – ຖ້າກວ່າເກີດການກະຕຸ້ນຂອງ buffer ຫຼາຍກວ່າ max ຈະໂດຍການລໍຖ້າຊ່ວງເວລາທີ່ກຳນົດ
       while (bufferedAmount() > AppConfig.maxBufferedAmount) {
         if (!isChannelOpen()) throw const TransferStalledException();
         if (DateTime.now().difference(lastDrain) >=
@@ -129,11 +133,13 @@ class FileChunkerService {
       lastDrain = DateTime.now();
 
       final end = (offset + chunkSize).clamp(0, bytes.length);
+      // ສົ່ງ chunk ແບບ async – ຖ້າ platform ແມ່ນ web ຈະແປງເປັນ Blob ແລະຊ່ວຍການສົ່ງຜ່ານ DataChannel ທີ່ສະໜອງແບບພາຍນອກຈາກຟັງຊັນ sendChunk ທີ່ອາດຈະຈັດການການປ່ຽນການສົ່ງກ່ອນ.
       await sendChunk(Uint8List.sublistView(bytes, offset, end));
       offset = end;
       onProgress(offset);
     }
   }
+
 }
 
 class _DigestSink implements Sink<Digest> {

@@ -13,7 +13,7 @@ class AppConfig {
   static const int chunkSize = 64 * 1024;
 
   /// ຂີດຈຳກັດ Buffer ສູງສຸດ 4 MB (Backpressure control ສຳລັບ High-speed streaming).
-  static const int maxBufferedAmount = 4 * 1024 * 1024;
+  static int get maxBufferedAmount => kIsWeb ? 16 * 1024 : 4 * 1024 * 1024; // 16 KB for WebRTC, 4 MB otherwise
 
   /// ເວລາລໍຖ້າລະຫວ່າງກວດ Buffer (ms).
   static const int backpressurePollMs = 4;
