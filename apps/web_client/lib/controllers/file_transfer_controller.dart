@@ -12,6 +12,7 @@ import '../models/incoming_batch_offer.dart';
 import '../models/incoming_file_offer.dart';
 import '../models/peer_device.dart';
 import '../models/picked_file.dart';
+import '../services/app_log_service.dart';
 import '../services/file_chunker_service.dart';
 import '../services/incoming_file_sink.dart';
 import '../services/webrtc_service.dart';
@@ -222,6 +223,10 @@ class FileTransferController extends ChangeNotifier {
     );
 
     try {
+      AppLogService.instance.info(
+        'ສະເໜີສົ່ງໄຟລ໌: ${file.name} (${file.readableSize}) ຫາ ${peer.name}',
+        tag: 'Transfer',
+      );
       await _webrtc.sendText(
         peer.id,
         jsonEncode({
@@ -238,6 +243,10 @@ class FileTransferController extends ChangeNotifier {
         onTimeout: () => false,
       );
       if (!accepted) {
+        AppLogService.instance.warn(
+          '${peer.name} ປະຕິເສດ ຫຼື ໝົດເວລາການຮັບ: ${file.name}',
+          tag: 'Transfer',
+        );
         _updateTransfer(
           transferId,
           (t) => t.copyWith(status: TransferStatus.cancelled),
@@ -245,6 +254,10 @@ class FileTransferController extends ChangeNotifier {
         return;
       }
 
+      AppLogService.instance.info(
+        '${peer.name} ຍອມຮັບແລ້ວ! ເລີ່ມສົ່ງຂໍ້ມູນ: ${file.name}',
+        tag: 'Transfer',
+      );
       _updateTransfer(
         transferId,
         (t) => t.copyWith(status: TransferStatus.transferring),
@@ -301,6 +314,10 @@ class FileTransferController extends ChangeNotifier {
         onTimeout: () => false,
       );
       if (!completed) {
+        AppLogService.instance.error(
+          'ບໍ່ໄດ້ຮັບຄຳຢືນຢັນຈາກ ${peer.name} ສຳລັບໄຟລ໌ ${file.name}',
+          tag: 'Transfer',
+        );
         _updateTransfer(
           transferId,
           (t) => t.copyWith(
@@ -308,8 +325,17 @@ class FileTransferController extends ChangeNotifier {
             error: 'ບໍ່ໄດ້ຮັບຄຳຢືນຢັນຈາກອຸປະກອນປາຍທາງ',
           ),
         );
+      } else {
+        AppLogService.instance.success(
+          'ໂອນໄຟລ໌ສຳເລັດສົມບູນ: ${file.name}',
+          tag: 'Transfer',
+        );
       }
     } on TransferCancelledException {
+      AppLogService.instance.warn(
+        'ການໂອນຖືກຍົກເລີກ: ${file.name}',
+        tag: 'Transfer',
+      );
       _updateTransfer(
         transferId,
         (t) => t.copyWith(status: TransferStatus.cancelled),
@@ -321,6 +347,11 @@ class FileTransferController extends ChangeNotifier {
         );
       }
     } catch (error) {
+      AppLogService.instance.error(
+        'ໂອນໄຟລ໌ບໍ່ສຳເລັດ: ${file.name} - $error',
+        tag: 'Transfer',
+        error: error,
+      );
       if (_webrtc.isOpen(peer.id)) {
         try {
           await _webrtc.sendText(
@@ -1033,6 +1064,10 @@ class FileTransferController extends ChangeNotifier {
   }
 
   Future<void> _failIncoming(String peerId, String id, String error) async {
+    AppLogService.instance.error(
+      'ການຮັບໄຟລ໌ລົ້ມເຫຼວ ($id): $error',
+      tag: 'Transfer',
+    );
     final incoming = _incoming.remove(id);
     if (incoming == null) return;
     incoming.dispose();
@@ -1077,6 +1112,22 @@ class FileTransferController extends ChangeNotifier {
       await incoming.sink?.abort();
     }
     final completed = verified && saveCompleted;
+    if (completed) {
+      AppLogService.instance.success(
+        'ຮັບໄຟລ໌ ແລະ ກວດສອບ SHA-256 ສຳເລັດ: ${incoming.fileName}',
+        tag: 'Transfer',
+      );
+    } else if (!verified) {
+      AppLogService.instance.error(
+        'ກວດສອບ SHA-256 ບໍ່ກົງກັນ: ${incoming.fileName} (ຄາດຫວັງ: $expected)',
+        tag: 'Transfer',
+      );
+    } else {
+      AppLogService.instance.error(
+        'ບັນທຶກໄຟລ໌ລົງ disk ບໍ່ສຳເລັດ ຫຼືຖືກຍົກເລີກ: ${incoming.fileName}',
+        tag: 'Transfer',
+      );
+    }
     if (_webrtc.isOpen(peerId)) {
       await _webrtc.sendText(
         peerId,

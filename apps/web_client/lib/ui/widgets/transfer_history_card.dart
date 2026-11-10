@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/yon_theme.dart';
 import '../../models/file_transfer_state.dart';
+import 'log_viewer_dialog.dart';
 
 /// Compact list of recent finished transfers for the connected-device view.
 class TransferHistoryCard extends StatelessWidget {
@@ -9,10 +10,12 @@ class TransferHistoryCard extends StatelessWidget {
     super.key,
     required this.transfers,
     this.maxItems = 6,
+    this.onOpenLogs,
   });
 
   final List<FileTransferState> transfers;
   final int maxItems;
+  final VoidCallback? onOpenLogs;
 
   @override
   Widget build(BuildContext context) {
@@ -59,6 +62,13 @@ class TransferHistoryCard extends StatelessWidget {
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'ບັນທຶກ Log & ກວດສອບບັນຫາ',
+                onPressed: onOpenLogs ?? () => LogViewerDialog.show(context),
+                icon: const Icon(Icons.receipt_long_rounded, size: 18),
+                visualDensity: VisualDensity.compact,
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -75,7 +85,7 @@ class TransferHistoryCard extends StatelessWidget {
                 ),
               ),
             )
-          else
+          else ...[
             for (var index = 0; index < history.length; index++) ...[
               if (index > 0)
                 Divider(
@@ -84,6 +94,21 @@ class TransferHistoryCard extends StatelessWidget {
                 ),
               _HistoryRow(transfer: history[index]),
             ],
+            if (history.any((t) => t.status == TransferStatus.failed)) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: onOpenLogs ?? () => LogViewerDialog.show(context),
+                  icon: const Icon(Icons.info_outline_rounded, size: 14),
+                  label: const Text(
+                    'ກວດສອບ Log ບັນຫາ',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                ),
+              ),
+            ],
+          ],
         ],
       ),
     );

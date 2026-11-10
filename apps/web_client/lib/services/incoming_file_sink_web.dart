@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
 
+import 'app_log_service.dart';
 import 'incoming_file_sink.dart';
 
 bool _supportsShowSaveFilePicker() {
@@ -35,15 +36,32 @@ Future<IncomingFileSink> createIncomingFileSink(String fileName) async {
       );
       final handle = await promise.toDart;
       final writer = await handle.createWritable().toDart;
+      AppLogService.instance.info(
+        'ໃຊ້ FileSystem Access API (SaveFilePicker) ສຳລັບ $fileName',
+        tag: 'Storage',
+      );
       return _WebIncomingFileSink(writer);
     } catch (e) {
       // If user cancelled save picker, rethrow so offer is rejected as intended
       final errStr = e.toString().toLowerCase();
       if (errStr.contains('aborterror') || errStr.contains('user cancelled')) {
+        AppLogService.instance.warn(
+          'ຜູ້ໃຊ້ຍົກເລີກການເລືອກບ່ອນບັນທຶກ: $fileName',
+          tag: 'Storage',
+        );
         rethrow;
       }
+      AppLogService.instance.warn(
+        'ບໍ່ສາມາດເປີດ showSaveFilePicker, ປ່ຽນໄປໃຊ້ in-memory Blob ($e)',
+        tag: 'Storage',
+      );
       // Otherwise fall back to in-memory Blob
     }
+  } else {
+    AppLogService.instance.info(
+      'Browser ບໍ່ຮອງຮັບ showSaveFilePicker, ໃຊ້ in-memory Blob ສຳລັບ $fileName',
+      tag: 'Storage',
+    );
   }
   return _BlobIncomingFileSink(fileName);
 }
@@ -137,6 +155,10 @@ class _BlobIncomingFileSink implements IncomingFileSink {
     final u8 = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
     _totalBytes += u8.length;
     if (_totalBytes > _maxInMemoryBytes) {
+      AppLogService.instance.error(
+        'ໄຟລ໌ໃຫຍ່ເກີນຂີດຈຳກັດ memory ($fileName): ${( _totalBytes / (1024*1024) ).toStringAsFixed(0)} MB > 1.5 GB',
+        tag: 'Storage',
+      );
       throw StateError(
         'Browser ບໍ່ຮອງຮັບ stream ລົງ disk (ຫຼືບໍ່ໄດ້ໃຊ້ HTTPS) ແລະໄຟລ໌ໃຫຍ່ເກີນຂີດຈຳກັດ memory (1.5 GB). ກະລຸນາໃຊ້ Chrome/Edge ຜ່ານ HTTPS ຫຼື ໃຊ້ YonFile App ແທນ.',
       );

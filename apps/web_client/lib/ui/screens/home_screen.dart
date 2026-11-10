@@ -22,6 +22,7 @@ import '../../services/file_picker_options.dart';
 import '../../services/signaling_service.dart';
 import '../../services/webrtc_service.dart';
 import '../widgets/home_header.dart';
+import '../widgets/log_viewer_dialog.dart';
 import '../widgets/pin_room_card.dart';
 import '../widgets/peer_os_badge.dart';
 import '../widgets/transfer_sheet.dart';
@@ -72,6 +73,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _ownPin = _randomPin();
   String? _joinedPin;
+  String? _connectingPin;
+  PeerDevice? _connectingPeer;
+  String _connectingStatusMessage = 'ກຳລັງກວດສອບລະຫັດ PIN...';
+  Timer? _connectingTimeoutTimer;
 
   final Set<String> _connectedPeerIds = {};
   final Map<String, String> _connectionRoutes = {};
@@ -181,8 +186,10 @@ class _HomeScreenState extends State<HomeScreen> {
       _signaling.errorStream.listen((code) {
         if (!mounted) return;
         if (code == 'pin_rate_limited') {
+          _cancelPinConnection(showMessage: false);
           _snack('ລອງເຂົ້າຫ້ອງຫຼາຍເກີນໄປ ກະລຸນາລໍຖ້າ 1 ນາທີ');
         } else if (code == 'invalid_pin') {
+          _cancelPinConnection(showMessage: false);
           _snack('ລະຫັດ PIN ບໍ່ຖືກຕ້ອງ');
         }
       }),
@@ -191,6 +198,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _subs.add(
       _signaling.peersStream.listen((event) {
         if (!mounted) return;
+        final currentPin = _joinedPin ?? _ownPin;
         setState(() {
           if (event.scope == PeerScope.lan) {
             _lanPeers
@@ -202,7 +210,7 @@ class _HomeScreenState extends State<HomeScreen> {
               );
           } else {
             // Ignore delayed updates from a PIN room the user has already left.
-            if (event.pin != _ownPin) return;
+            if (event.pin != currentPin) return;
             _pinPeers
               ..clear()
               ..addEntries(
@@ -216,9 +224,17 @@ class _HomeScreenState extends State<HomeScreen> {
             .where((peer) => peer.id != _peerId)
             .toList(growable: false);
         if (event.scope == PeerScope.pin &&
-            event.pin == _ownPin &&
-            pinRoomPeers.length == 1) {
-          unawaited(_connectToPinPeer(pinRoomPeers.single));
+            event.pin == currentPin &&
+            pinRoomPeers.isNotEmpty) {
+          final target = pinRoomPeers.first;
+          if (_connectingPin != null && _connectingPeer == null) {
+            setState(() {
+              _connectingPeer = target;
+              _connectingStatusMessage =
+                  'ພົບ ${target.name} ແລ້ວ! ກຳລັງສ້າງການເຊື່ອມຕໍ່ P2P...';
+            });
+          }
+          unawaited(_connectToPinPeer(target));
         }
       }),
     );
@@ -230,6 +246,12 @@ class _HomeScreenState extends State<HomeScreen> {
           if (event.isOpen) {
             _connectedPeerIds.add(event.peerId);
             _activePeerId ??= event.peerId;
+            if (_connectingPin != null) {
+              _connectingPin = null;
+              _connectingPeer = null;
+              _connectingTimeoutTimer?.cancel();
+              _connectingTimeoutTimer = null;
+            }
           } else {
             _connectedPeerIds.remove(event.peerId);
             _connectionRoutes.remove(event.peerId);
@@ -257,6 +279,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _connectingTimeoutTimer?.cancel();
+    _connectingTimeoutTimer = null;
     for (final sub in _subs) {
       sub.cancel();
     }
@@ -503,21 +527,17 @@ class _HomeScreenState extends State<HomeScreen> {
       return false;
     }
 
-    final previousJoinedPin = _joinedPin;
-    final previousSignalingPin = previousJoinedPin ?? _ownPin;
-    _joinPin(pin);
-    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    _joinPin(pin, targetPeer: peer);
+    final deadline = DateTime.now().add(const Duration(seconds: 14));
     while (mounted && DateTime.now().isBefore(deadline)) {
-      if (_joinedPin == pin && _pinPeers.containsKey(peer.id)) {
-        _snack('PIN ຖືກຕ້ອງ ແລະ ${peer.name} ຢູ່ໃນຫ້ອງນີ້');
-        return true;
-      }
-      // A peer may already have completed WebRTC while its room-list update
-      // is delayed. The open data channel is authoritative in that case.
       if (_webrtc.isOpen(peer.id)) {
         _setActiveConnectedPeer(peer.id);
         _snack('ເຊື່ອມຕໍ່ ${peer.name} ສຳເລັດແລ້ວ');
         return true;
+      }
+      if (_connectingPin == null) {
+        // ຜູ້ໃຊ້ກົດຍົກເລີກການເຊື່ອມຕໍ່
+        return false;
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
@@ -526,12 +546,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _snack('ເຊື່ອມຕໍ່ ${peer.name} ສຳເລັດແລ້ວ');
       return true;
     }
-    if (mounted) {
-      _signaling.joinPin(previousSignalingPin);
-      setState(() {
-        _joinedPin = previousJoinedPin;
-        _pinPeers.clear();
-      });
+    if (mounted && _connectingPin != null) {
+      _cancelPinConnection(showMessage: false);
       _snack('PIN ບໍ່ຖືກຕ້ອງ ຫຼື ${peer.name} ບໍ່ໄດ້ເຂົ້າຫ້ອງ PIN ນີ້');
     }
     return false;
@@ -539,13 +555,54 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /* ------------------------------- Actions ----------------------------- */
 
-  void _joinPin(String pin) {
-    _signaling.joinPin(pin);
+  void _joinPin(String pin, {PeerDevice? targetPeer}) {
+    _connectingTimeoutTimer?.cancel();
     setState(() {
+      _connectingPin = pin;
+      _connectingPeer = targetPeer;
+      _connectingStatusMessage = targetPeer != null
+          ? 'ກຳລັງກວດສອບ PIN ແລະ ເຊື່ອມຕໍ່ຫາ ${targetPeer.name}...'
+          : 'ກຳລັງກວດສອບລະຫັດ PIN: ${_formatPin(pin)}...';
       _joinedPin = pin;
       _pinPeers.clear();
     });
-    _snack('ກຳລັງເຂົ້າຫ້ອງ PIN');
+
+    _signaling.joinPin(pin);
+
+    // Timeout 15 ວິນາທີ ຖ້າບໍ່ພົບອຸປະກອນ ຫຼື ເຊື່ອມຕໍ່ບໍ່ໄດ້
+    _connectingTimeoutTimer = Timer(const Duration(seconds: 15), () {
+      if (!mounted || _connectingPin == null) return;
+      final targetName = _connectingPeer?.name;
+      _cancelPinConnection(showMessage: false);
+      _snack(
+        targetName != null
+            ? 'ໝົດເວລາ: ບໍ່ສາມາດເຊື່ອມຕໍ່ກັບ $targetName ໄດ້'
+            : 'ໝົດເວລາ: ບໍ່ພົບອຸປະກອນໃນລະຫັດ PIN ນີ້ ຫຼື ລະຫັດບໍ່ຖືກຕ້ອງ',
+      );
+    });
+  }
+
+  void _cancelPinConnection({bool showMessage = true}) {
+    _connectingTimeoutTimer?.cancel();
+    _connectingTimeoutTimer = null;
+    final previousPin = _ownPin;
+    _signaling.joinPin(previousPin);
+    setState(() {
+      _connectingPin = null;
+      _connectingPeer = null;
+      _joinedPin = null;
+      _pinPeers.clear();
+    });
+    if (showMessage) {
+      _snack('ຍົກເລີກການເຊື່ອມຕໍ່ແລ້ວ');
+    }
+  }
+
+  static String _formatPin(String pin) {
+    if (pin.length == 6) {
+      return '${pin.substring(0, 3)} - ${pin.substring(3)}';
+    }
+    return pin;
   }
 
   Future<void> _connectToPinPeer(PeerDevice peer) async {
@@ -569,6 +626,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _openPinPeer(PeerDevice peer) async {
     try {
       if (!_webrtc.isOpen(peer.id)) {
+        if (mounted && _connectingPin != null) {
+          setState(() {
+            _connectingPeer = peer;
+            _connectingStatusMessage =
+                'ພົບ ${peer.name} ແລ້ວ! ກຳລັງສ້າງການເຊື່ອມຕໍ່ P2P...';
+          });
+        }
         await _webrtc.connect(peer.id);
         await _webrtc.waitUntilOpen(peer.id);
       }
@@ -576,7 +640,12 @@ class _HomeScreenState extends State<HomeScreen> {
       _setActiveConnectedPeer(peer.id);
     } catch (error) {
       debugPrint('PIN peer connection failed (${peer.id}): $error');
-      if (mounted) _snack(_connectionFailureMessage(peer.name));
+      if (mounted) {
+        if (_connectingPin != null) {
+          _cancelPinConnection(showMessage: false);
+        }
+        _snack(_connectionFailureMessage(peer.name));
+      }
     }
   }
 
@@ -589,14 +658,20 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _connectedPeerIds.add(peerId);
       _activePeerId = peerId;
+      _connectingPin = null;
+      _connectingPeer = null;
+      _connectingTimeoutTimer?.cancel();
+      _connectingTimeoutTimer = null;
     });
   }
 
   void _leavePin() {
+    _cancelPinConnection(showMessage: false);
     _changePin(showMessage: false);
   }
 
   void _changePin({bool showMessage = true}) {
+    _cancelPinConnection(showMessage: false);
     _signaling.leavePin();
     final nextPin = _randomPin();
     _signaling.joinPin(nextPin);
@@ -1083,8 +1158,13 @@ class _HomeScreenState extends State<HomeScreen> {
     themeMode: widget.themeMode,
     onOfflineSettings: _showOfflineOptions,
     onTransferHistory: _openTransferSheet,
+    onOpenLogs: _openLogViewer,
     onToggleTheme: widget.onToggleTheme,
   );
+
+  void _openLogViewer() {
+    LogViewerDialog.show(context);
+  }
 
   Widget _buildMobile() {
     return Column(
@@ -1139,11 +1219,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (isConnected) ...[
                         TransferHistoryCard(
                           transfers: _fileTransfers.transfers,
+                          onOpenLogs: _openLogViewer,
                         ),
                       ] else ...[
                         PinRoomCard(
                           ownPin: _ownPin,
                           joinedPin: _joinedPin,
+                          isConnecting: _connectingPin != null,
                           onJoinPin: _joinPin,
                           onLeavePin: _leavePin,
                           onChangePin: _changePin,
@@ -1168,6 +1250,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (peer != null && _connectedPeerIds.contains(peer.id)) {
       return _buildConnectionStage(peer);
     }
+    if (_connectingPin != null) {
+      return _buildConnectingStage();
+    }
     return RadarScreen(
       self: _selfDevice,
       peers: _peers,
@@ -1183,6 +1268,156 @@ class _HomeScreenState extends State<HomeScreen> {
       onLongPressPeer: _sendTextMessage,
       onDroppedFiles: _sendDroppedFiles,
       onDropRejected: _snack,
+    );
+  }
+
+  Widget _buildConnectingStage() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final pinFormatted =
+        _connectingPin != null ? _formatPin(_connectingPin!) : '';
+    final targetName = _connectingPeer?.name;
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 460),
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
+          decoration: BoxDecoration(
+            color: isDark
+                ? YonTheme.slateDarkCard.withValues(alpha: 0.88)
+                : Colors.white,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(
+              color: YonTheme.yonOrange.withValues(alpha: 0.35),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: YonTheme.yonOrange.withValues(
+                  alpha: isDark ? 0.08 : 0.06,
+                ),
+                blurRadius: 28,
+                spreadRadius: 4,
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 88,
+                height: 88,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: YonTheme.primaryGradient,
+                  boxShadow: [
+                    BoxShadow(
+                      color: YonTheme.yonOrange.withValues(alpha: 0.35),
+                      blurRadius: 22,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.sync_rounded,
+                    size: 44,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'ກຳລັງເຊື່ອມຕໍ່...',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              if (_connectingPin != null) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: YonTheme.yonOrange.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: YonTheme.yonOrange.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.pin_rounded,
+                        size: 18,
+                        color: YonTheme.yonOrange,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'ລະຫັດ PIN: $pinFormatted',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: YonTheme.yonOrange,
+                          letterSpacing: 1.5,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              Text(
+                _connectingStatusMessage,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white70 : Colors.black87,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 24),
+              const SizedBox(
+                width: 220,
+                child: LinearProgressIndicator(
+                  minHeight: 4,
+                  color: YonTheme.yonOrange,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                targetName != null
+                    ? 'ກຳລັງຈັບຄູ່ກັບ $targetName ຜ່ານລະຫັດ PIN...'
+                    : 'ກະລຸນາເປີດແອັບ YonFile ຢູ່ອຸປະກອນປາຍທາງ ແລະ ໃຫ້ແນ່ໃຈວ່າໃສ່ລະຫັດ PIN ດຽວກັນ',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: isDark ? Colors.white54 : Colors.black54,
+                    ),
+              ),
+              const SizedBox(height: 28),
+              OutlinedButton.icon(
+                onPressed: _cancelPinConnection,
+                icon: const Icon(Icons.close_rounded, size: 18),
+                label: const Text('ຍົກເລີກການເຊື່ອມຕໍ່'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  side: BorderSide(
+                    color: isDark ? Colors.white24 : Colors.black26,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1204,6 +1439,7 @@ class _HomeScreenState extends State<HomeScreen> {
       onDropFiles: (files) => _sendFiles(peer, files),
       onDropRejected: _snack,
       onDisconnect: _disconnectActivePeer,
+      onOpenLogs: _openLogViewer,
       onSendText: () => _sendTextMessage(peer),
       onAccept: _fileTransfers.acceptIncomingOffer,
       onReject: _fileTransfers.rejectIncomingOffer,
@@ -1241,6 +1477,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: PinRoomCard(
               ownPin: _ownPin,
               joinedPin: _joinedPin,
+              isConnecting: _connectingPin != null,
               onJoinPin: (pin) {
                 _joinPin(pin);
                 Navigator.pop(sheetContext);

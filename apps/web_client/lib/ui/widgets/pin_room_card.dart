@@ -14,6 +14,7 @@ class PinRoomCard extends StatefulWidget {
     required this.onLeavePin,
     required this.onChangePin,
     required this.onScan,
+    this.isConnecting = false,
   });
 
   final String ownPin;
@@ -22,6 +23,7 @@ class PinRoomCard extends StatefulWidget {
   final VoidCallback onLeavePin;
   final VoidCallback onChangePin;
   final VoidCallback onScan;
+  final bool isConnecting;
 
   @override
   State<PinRoomCard> createState() => _PinRoomCardState();
@@ -190,6 +192,7 @@ class _PinRoomCardState extends State<PinRoomCard> {
               Expanded(
                 child: TextField(
                   controller: _controller,
+                  enabled: !widget.isConnecting,
                   keyboardType: TextInputType.number,
                   maxLength: 6,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
@@ -202,14 +205,23 @@ class _PinRoomCardState extends State<PinRoomCard> {
               ),
               const SizedBox(width: 8),
               ElevatedButton(
-                onPressed: _join,
+                onPressed: widget.isConnecting ? null : _join,
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 20,
                     vertical: 14,
                   ),
                 ),
-                child: const Text('ເຊື່ອມຕໍ່'),
+                child: widget.isConnecting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text('ເຊື່ອມຕໍ່'),
               ),
             ],
           ),

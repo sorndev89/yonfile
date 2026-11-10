@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/yon_theme.dart';
 import '../../models/file_transfer_state.dart';
+import 'log_viewer_dialog.dart';
 
 /// Modal ສະແດງຄວາມຄືບໜ້າການໂຍນໄຟລ໌.
 class TransferSheet extends StatelessWidget {
@@ -84,6 +85,11 @@ class TransferSheet extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
+                  IconButton(
+                    tooltip: 'ບັນທຶກ Log & ກວດສອບບັນຫາ',
+                    onPressed: () => LogViewerDialog.show(context),
+                    icon: const Icon(Icons.receipt_long_rounded, size: 20),
+                  ),
                   if (onClearCompleted != null)
                     TextButton(
                       onPressed: onClearCompleted,
@@ -287,9 +293,37 @@ class _TransferTile extends StatelessWidget {
           if (transfer.error != null)
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                transfer.error!,
-                style: const TextStyle(fontSize: 11, color: YonTheme.roseRed),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      transfer.error!,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: YonTheme.roseRed,
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => LogViewerDialog.show(context),
+                    borderRadius: BorderRadius.circular(4),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        'ເບິ່ງ Log',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: YonTheme.yonOrange,
+                          fontWeight: FontWeight.w700,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
         ],

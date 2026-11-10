@@ -14,6 +14,7 @@ import '../../services/file_stream_helper.dart';
 import '../widgets/transfer_sheet.dart';
 import '../widgets/transfer_history_card.dart';
 import '../widgets/peer_os_badge.dart';
+import '../widgets/log_viewer_dialog.dart';
 
 /// Active peer session UI: connected devices, pending offers and transfers.
 class ConnectionScreen extends StatelessWidget {
@@ -36,6 +37,7 @@ class ConnectionScreen extends StatelessWidget {
     required this.onRejectBatch,
     required this.onCancelTransfer,
     this.onSendText,
+    this.onOpenLogs,
     this.showHistory = true,
   });
 
@@ -56,6 +58,7 @@ class ConnectionScreen extends StatelessWidget {
   final ValueChanged<String> onRejectBatch;
   final ValueChanged<String> onCancelTransfer;
   final VoidCallback? onSendText;
+  final VoidCallback? onOpenLogs;
   final bool showHistory;
 
   @override
@@ -94,6 +97,11 @@ class ConnectionScreen extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
+                ),
+                IconButton(
+                  tooltip: 'ບັນທຶກ Log & ກວດສອບບັນຫາ',
+                  onPressed: onOpenLogs ?? () => LogViewerDialog.show(context),
+                  icon: const Icon(Icons.receipt_long_rounded),
                 ),
                 IconButton(
                   tooltip: 'ກັບໄປຄົ້ນຫາອຸປະກອນ',

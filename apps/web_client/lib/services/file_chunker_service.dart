@@ -4,8 +4,6 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
-import 'package:flutter/foundation.dart';
-
 import '../core/constants/app_config.dart';
 import 'incoming_file_sink.dart';
 

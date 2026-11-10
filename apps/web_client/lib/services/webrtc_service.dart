@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../core/constants/app_config.dart';
+import 'app_log_service.dart';
 import 'signaling_service.dart';
 
 /// ຂໍ້ຄວາມທີ່ຮັບເຂົ້າມາຈາກ DataChannel ຂອງ peer ໃດໜຶ່ງ.
@@ -184,25 +185,37 @@ class WebRtcService {
 
     pc.onIceConnectionState = (state) {
       debugPrint('WebRTC ICE state ($peerId): $state');
+      AppLogService.instance.info('ICE Connection State: ${state.name}', tag: 'WebRTC');
       if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        AppLogService.instance.error(
+          'ICE negotiation failed: ບໍ່ສາມາດເຊື່ອມຕໍ່ກັນໄດ້ໂດຍກົງ ຕ້ອງມີ TURN relay',
+          tag: 'WebRTC',
+        );
         _failSession(
           session,
           'ICE negotiation failed. A TURN relay may be required for these networks.',
         );
       } else if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        AppLogService.instance.success('ICE ເຊື່ອມຕໍ່ສຳເລັດແລ້ວ (${state.name})', tag: 'WebRTC');
         unawaited(_publishSelectedRoute(session));
       }
     };
 
     pc.onConnectionState = (state) {
       debugPrint('WebRTC peer state ($peerId): $state');
+      AppLogService.instance.info('Peer State: ${state.name}', tag: 'WebRTC');
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        AppLogService.instance.error(
+          'Peer connection failed. Check the TURN relay and network firewall.',
+          tag: 'WebRTC',
+        );
         _failSession(
           session,
           'Peer connection failed. Check the TURN relay and network firewall.',
         );
       } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+        AppLogService.instance.warn('Peer connection ຖືກປິດ (Closed)', tag: 'WebRTC');
         _teardown(peerId);
       }
     };
@@ -245,6 +258,17 @@ class WebRtcService {
     channel.onDataChannelState = (state) {
       if (!_stateController.isClosed) {
         _stateController.add(PeerChannelState(session.peerId, state));
+      }
+      if (state == RTCDataChannelState.RTCDataChannelOpen) {
+        AppLogService.instance.success(
+          'DataChannel ເປີດສຳເລັດ ພ້ອມໂອນໄຟລ໌ (${session.peerId})',
+          tag: 'WebRTC',
+        );
+      } else if (state == RTCDataChannelState.RTCDataChannelClosed) {
+        AppLogService.instance.warn(
+          'DataChannel ປິດແລ້ວ (${session.peerId})',
+          tag: 'WebRTC',
+        );
       }
       if (state == RTCDataChannelState.RTCDataChannelOpen &&
           !session.openCompleter.isCompleted) {

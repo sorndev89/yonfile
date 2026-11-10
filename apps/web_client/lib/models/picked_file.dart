@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'file_transfer_state.dart';
 
 /// ໄຟລ໌ທີ່ຖືກເລືອກ ຫຼື ລາກມາວາງ ພ້ອມ bytes ສຳລັບສົ່ງ.
 class PickedFile {
@@ -15,4 +16,6 @@ class PickedFile {
     this.readStream,
     this.mimeType = 'application/octet-stream',
   }) : assert(bytes != null || readStream != null);
+
+  String get readableSize => FileTransferState.formatBytes(size);
 }

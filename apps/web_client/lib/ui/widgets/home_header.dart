@@ -12,6 +12,7 @@ class HomeHeader extends StatelessWidget {
     required this.onOfflineSettings,
     required this.onTransferHistory,
     required this.onToggleTheme,
+    this.onOpenLogs,
   });
 
   final bool signalingConnected;
@@ -21,6 +22,7 @@ class HomeHeader extends StatelessWidget {
   final VoidCallback onOfflineSettings;
   final VoidCallback onTransferHistory;
   final VoidCallback onToggleTheme;
+  final VoidCallback? onOpenLogs;
 
   @override
   Widget build(BuildContext context) {
@@ -78,6 +80,12 @@ class HomeHeader extends StatelessWidget {
               icon: Icons.swap_vert_rounded,
               count: activeTransferCount,
               onTap: onTransferHistory,
+            ),
+          if (onOpenLogs != null)
+            IconButton(
+              tooltip: 'ບັນທຶກ Log & ກວດສອບບັນຫາ',
+              onPressed: onOpenLogs,
+              icon: const Icon(Icons.receipt_long_rounded),
             ),
           IconButton(
             tooltip: 'ແຈ້ງເຕືອນ',
