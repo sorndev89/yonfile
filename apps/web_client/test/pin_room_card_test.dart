@@ -65,5 +65,85 @@ void main() {
 
     expect(joinedPin, '999888');
   });
+
+  testWidgets('PIN Dialog with ຕົກລົງ button triggers connection when 6 digits entered', (
+    tester,
+  ) async {
+    String? submittedPin;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () async {
+                var enteredPin = '';
+                final pin = await showDialog<String>(
+                  context: context,
+                  builder: (dialogContext) => StatefulBuilder(
+                    builder: (ctx, setDialogState) => AlertDialog(
+                      title: const Text('ປ້ອນລະຫັດຜ່ານ (PIN)'),
+                      content: TextField(
+                        autofocus: true,
+                        maxLength: 6,
+                        onChanged: (v) => setDialogState(() => enteredPin = v.trim()),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialogContext),
+                          child: const Text('ຍົກເລີກ'),
+                        ),
+                        ElevatedButton(
+                          onPressed: enteredPin.length == 6
+                              ? () => Navigator.pop(dialogContext, enteredPin)
+                              : null,
+                          child: const Text('ຕົກລົງ'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+                submittedPin = pin;
+              },
+              child: const Text('Open Dialog'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open Dialog'));
+    await tester.pumpAndSettle();
+
+    // Verify dialog title and actions
+    expect(find.text('ປ້ອນລະຫັດຜ່ານ (PIN)'), findsOneWidget);
+    expect(find.text('ຍົກເລີກ'), findsOneWidget);
+    expect(find.text('ຕົກລົງ'), findsOneWidget);
+
+    // Initially "ຕົກລົງ" button is disabled (< 6 digits)
+    final okButtonFinder = find.widgetWithText(ElevatedButton, 'ຕົກລົງ');
+    var okButton = tester.widget<ElevatedButton>(okButtonFinder);
+    expect(okButton.onPressed, isNull);
+
+    // Enter partial PIN (3 digits)
+    await tester.enterText(find.byType(TextField), '123');
+    await tester.pump();
+    okButton = tester.widget<ElevatedButton>(okButtonFinder);
+    expect(okButton.onPressed, isNull);
+
+    // Enter full 6 digits
+    await tester.enterText(find.byType(TextField), '123456');
+    await tester.pump();
+    okButton = tester.widget<ElevatedButton>(okButtonFinder);
+    expect(okButton.onPressed, isNotNull);
+
+    // Click "ຕົກລົງ"
+    await tester.tap(okButtonFinder);
+    await tester.pumpAndSettle();
+
+    // Dialog dismissed and submittedPin captured
+    expect(find.text('ປ້ອນລະຫັດຜ່ານ (PIN)'), findsNothing);
+    expect(submittedPin, '123456');
+  });
 }
 

@@ -14,6 +14,7 @@ import '../../core/theme/yon_theme.dart';
 import '../../models/file_transfer_state.dart';
 import '../../models/peer_device.dart';
 import '../../models/picked_file.dart';
+import '../../services/app_log_service.dart';
 import '../../services/file_stream_helper.dart';
 import '../../services/local_signaling_host.dart';
 import '../../services/lan_discovery.dart';
@@ -490,18 +491,24 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('ໃສ່ PIN ຂອງ ${peer.name}'),
+          title: Text('ປ້ອນລະຫັດຜ່ານ (PIN) ຂອງ ${peer.name}'),
           content: TextField(
             autofocus: true,
             keyboardType: TextInputType.number,
             maxLength: 6,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             decoration: const InputDecoration(
-              hintText: 'PIN 6 ໂຕເລກ',
+              hintText: 'ລະຫັດ PIN 6 ຕົວເລກ',
               counterText: '',
             ),
             onChanged: (value) =>
                 setDialogState(() => enteredPin = value.trim()),
-            onSubmitted: (value) => Navigator.pop(dialogContext, value.trim()),
+            onSubmitted: (value) {
+              final trimmed = value.trim();
+              if (trimmed.length == 6) {
+                Navigator.pop(dialogContext, trimmed);
+              }
+            },
           ),
           actions: [
             TextButton(
@@ -509,8 +516,10 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text('ຍົກເລີກ'),
             ),
             ElevatedButton(
-              onPressed: () => Navigator.pop(dialogContext, enteredPin),
-              child: const Text('ຢືນຢັນ'),
+              onPressed: enteredPin.length == 6
+                  ? () => Navigator.pop(dialogContext, enteredPin)
+                  : null,
+              child: const Text('ຕົກລົງ'),
             ),
           ],
         ),
@@ -557,6 +566,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _joinPin(String pin, {PeerDevice? targetPeer}) {
     _connectingTimeoutTimer?.cancel();
+    AppLogService.instance.info(
+      'ເລີ່ມຕົ້ນເຊື່ອມຕໍ່ຜ່ານລະຫັດ PIN: ${_formatPin(pin)}${targetPeer != null ? " ຫາ ${targetPeer.name}" : ""}',
+      tag: 'PIN',
+    );
     setState(() {
       _connectingPin = pin;
       _connectingPeer = targetPeer;
@@ -569,10 +582,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _signaling.joinPin(pin);
 
+    if (targetPeer != null) {
+      unawaited(_connectToPinPeer(targetPeer));
+    }
+
     // Timeout 15 ວິນາທີ ຖ້າບໍ່ພົບອຸປະກອນ ຫຼື ເຊື່ອມຕໍ່ບໍ່ໄດ້
     _connectingTimeoutTimer = Timer(const Duration(seconds: 15), () {
       if (!mounted || _connectingPin == null) return;
       final targetName = _connectingPeer?.name;
+      AppLogService.instance.warn(
+        'ໝົດເວລາການເຊື່ອມຕໍ່ PIN: ${_formatPin(pin)}',
+        tag: 'PIN',
+      );
       _cancelPinConnection(showMessage: false);
       _snack(
         targetName != null
@@ -637,9 +658,17 @@ class _HomeScreenState extends State<HomeScreen> {
         await _webrtc.waitUntilOpen(peer.id);
       }
       if (!mounted || !_webrtc.isOpen(peer.id)) return;
+      AppLogService.instance.success(
+        'ເຊື່ອມຕໍ່ຫາ ${peer.name} (${peer.id}) ສຳເລັດແລ້ວ',
+        tag: 'PIN',
+      );
       _setActiveConnectedPeer(peer.id);
     } catch (error) {
       debugPrint('PIN peer connection failed (${peer.id}): $error');
+      AppLogService.instance.error(
+        'ເຊື່ອມຕໍ່ກັບ ${peer.name} ບໍ່ສຳເລັດ: $error',
+        tag: 'PIN',
+      );
       if (mounted) {
         if (_connectingPin != null) {
           _cancelPinConnection(showMessage: false);
@@ -1246,12 +1275,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildMainStage() {
+    if (_connectingPin != null) {
+      return _buildConnectingStage();
+    }
     final peer = _activePeer;
     if (peer != null && _connectedPeerIds.contains(peer.id)) {
       return _buildConnectionStage(peer);
-    }
-    if (_connectingPin != null) {
-      return _buildConnectingStage();
     }
     return RadarScreen(
       self: _selfDevice,
@@ -1318,12 +1347,24 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ],
                 ),
-                child: const Center(
-                  child: Icon(
-                    Icons.sync_rounded,
-                    size: 44,
-                    color: Colors.white,
-                  ),
+                child: const Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox(
+                      width: 52,
+                      height: 52,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(Colors.white70),
+                      ),
+                    ),
+                    Icon(
+                      Icons.sync_rounded,
+                      size: 32,
+                      color: Colors.white,
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 24),
