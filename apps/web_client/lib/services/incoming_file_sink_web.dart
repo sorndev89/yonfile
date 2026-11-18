@@ -1,13 +1,34 @@
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:web/web.dart' as web;
 
 import 'app_log_service.dart';
 import 'incoming_file_sink.dart';
 
+bool _isMobileBrowser() {
+  if (defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS) {
+    return true;
+  }
+  try {
+    final ua = web.window.navigator.userAgent.toLowerCase();
+    return ua.contains('android') ||
+        ua.contains('iphone') ||
+        ua.contains('ipad') ||
+        ua.contains('ipod') ||
+        ua.contains('mobile');
+  } catch (_) {
+    return false;
+  }
+}
+
 bool _supportsShowSaveFilePicker() {
+  // Mobile browsers (Android/iOS) fail with NotFoundError during stream writes
+  // via Storage Access Framework (SAF). showSaveFilePicker is only reliable on desktop.
+  if (_isMobileBrowser()) return false;
+
   try {
     final win = web.window as JSObject;
     return win.has('showSaveFilePicker');
@@ -17,6 +38,8 @@ bool _supportsShowSaveFilePicker() {
 }
 
 bool _supportsShowDirectoryPicker() {
+  if (_isMobileBrowser()) return false;
+
   try {
     final win = web.window as JSObject;
     return win.has('showDirectoryPicker');
