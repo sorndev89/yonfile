@@ -228,14 +228,20 @@ class _HomeScreenState extends State<HomeScreen> {
             event.pin == currentPin &&
             pinRoomPeers.isNotEmpty) {
           final target = pinRoomPeers.first;
-          if (_connectingPin != null && _connectingPeer == null) {
-            setState(() {
-              _connectingPeer = target;
-              _connectingStatusMessage =
-                  'ພົບ ${target.name} ແລ້ວ! ກຳລັງສ້າງການເຊື່ອມຕໍ່ P2P...';
-            });
+          // ປ້ອງກັນ WebRTC Glare / Collision:
+          // ສະເພາະອຸປະກອນທີ່ກຳລັງປ້ອນ PIN ເພື່ອເຊື່ອມຕໍ່ (_connectingPin != null)
+          // ເທົ່ານັ້ນທີ່ຈະເປັນ Initiator ສ້າງ WebRTC Offer.
+          // ອຸປະກອນເຈົ້າຂອງຫ້ອງ (_connectingPin == null) ຈະລໍຖ້າຮັບ Offer ໂດຍບໍ່ຍິງຊ້ອນ.
+          if (_connectingPin != null) {
+            if (_connectingPeer == null) {
+              setState(() {
+                _connectingPeer = target;
+                _connectingStatusMessage =
+                    'ພົບ ${target.name} ແລ້ວ! ກຳລັງສ້າງການເຊື່ອມຕໍ່ P2P...';
+              });
+            }
+            unawaited(_connectToPinPeer(target));
           }
-          unawaited(_connectToPinPeer(target));
         }
       }),
     );
@@ -398,10 +404,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final pinWasAlreadyJoined = _hasPinAccess(peer);
     if (!await _ensurePinAccess(peer)) return;
     if (!pinWasAlreadyJoined) {
-      // First PIN entry establishes the connection. Let the user review the
-      // connected-device screen before choosing any files to send.
       await _connectToPinPeer(peer);
-      return;
+      if (!_webrtc.isOpen(peer.id)) return;
     }
     try {
       final files = await FilePicker.pickFiles(

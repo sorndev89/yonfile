@@ -184,7 +184,11 @@ class _BlobIncomingFileSink implements IncomingFileSink {
     anchor.click();
     anchor.remove();
     _chunks.clear();
-    Future.delayed(const Duration(seconds: 10), () {
+    AppLogService.instance.success(
+      'ດາວໂຫຼດໄຟລ໌ສຳເລັດ (Blob): $fileName',
+      tag: 'Storage',
+    );
+    Future.delayed(const Duration(seconds: 60), () {
       web.URL.revokeObjectURL(url);
     });
   }

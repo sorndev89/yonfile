@@ -232,7 +232,9 @@ class WebRtcService {
     try {
       final dc = await session.pc.createDataChannel(
         'yonfile',
-        RTCDataChannelInit()..ordered = true,
+        RTCDataChannelInit()
+          ..ordered = true
+          ..binaryType = 'binary',
       );
       _bindChannel(session, dc);
 
@@ -398,9 +400,13 @@ class WebRtcService {
       return;
     }
     if (collision) {
-      await session.pc.setLocalDescription(
-        RTCSessionDescription('', 'rollback'),
-      );
+      try {
+        await session.pc.setLocalDescription(
+          RTCSessionDescription('', 'rollback'),
+        );
+      } catch (e) {
+        debugPrint('WebRTC rollback ignored or unsupported: $e');
+      }
       session.remoteDescriptionSet = false;
       session.channel?.close();
       session.channel = null;

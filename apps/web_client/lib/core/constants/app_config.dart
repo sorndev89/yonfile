@@ -12,8 +12,9 @@ class AppConfig {
   /// ຂະໜາດ Chunk 64 KB ເພື່ອໃຫ້ໄດ້ Throughput ສູງສຸດ ແລະ ຮອງຮັບ SCTP ໃນທຸກ browser/mobile.
   static const int chunkSize = 64 * 1024;
 
-  /// ຂີດຈຳກັດ Buffer ສູງສຸດ 4 MB (Backpressure control ສຳລັບ High-speed streaming).
-  static int get maxBufferedAmount => kIsWeb ? 16 * 1024 : 4 * 1024 * 1024; // 16 KB for WebRTC, 4 MB otherwise
+  /// ຂີດຈຳກັດ Buffer ສູງສຸດ (Backpressure control ສຳລັບ High-speed streaming).
+  /// ຕັ້ງ 1 MB ສຳລັບ Web ເພື່ອຮອງຮັບ 16 chunks (64 KB) ໃນ transit ໂດຍບໍ່ stall.
+  static int get maxBufferedAmount => kIsWeb ? 1024 * 1024 : 4 * 1024 * 1024;
 
   /// ເວລາລໍຖ້າລະຫວ່າງກວດ Buffer (ms).
   static const int backpressurePollMs = 4;

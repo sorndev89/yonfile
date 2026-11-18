@@ -72,6 +72,54 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes arrive { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
   </style>
+  <script>
+    // ຮັບປະກັນວ່າ WebRTC DataChannels ທຸກຊ່ອງ (ທັງສ້າງເອງ ແລະ ຮັບຈາກອີກຝັ່ງ)
+    // ຈະໃຊ້ binaryType = 'arraybuffer' ແທນ 'blob' ເພື່ອປ້ອງກັນບັນຫາ binary chunk stall/corrupt ເທິງ Chromium
+    (function () {
+      if (typeof RTCPeerConnection === 'undefined') return;
+
+      var origCreate = RTCPeerConnection.prototype.createDataChannel;
+      RTCPeerConnection.prototype.createDataChannel = function () {
+        var dc = origCreate.apply(this, arguments);
+        try { dc.binaryType = 'arraybuffer'; } catch (e) {}
+        return dc;
+      };
+
+      var desc = Object.getOwnPropertyDescriptor(RTCPeerConnection.prototype, 'ondatachannel');
+      if (desc && desc.set) {
+        var origSet = desc.set;
+        Object.defineProperty(RTCPeerConnection.prototype, 'ondatachannel', {
+          set: function (handler) {
+            if (!handler) return origSet.call(this, handler);
+            var wrapped = function (event) {
+              if (event && event.channel) {
+                try { event.channel.binaryType = 'arraybuffer'; } catch (e) {}
+              }
+              return handler.apply(this, arguments);
+            };
+            return origSet.call(this, wrapped);
+          },
+          get: desc.get,
+          configurable: true,
+          enumerable: true,
+        });
+      }
+
+      var origAddEventListener = RTCPeerConnection.prototype.addEventListener;
+      RTCPeerConnection.prototype.addEventListener = function (type, listener, options) {
+        if (type === 'datachannel') {
+          var wrapped = function (event) {
+            if (event && event.channel) {
+              try { event.channel.binaryType = 'arraybuffer'; } catch (e) {}
+            }
+            return listener.apply(this, arguments);
+          };
+          return origAddEventListener.call(this, type, wrapped, options);
+        }
+        return origAddEventListener.apply(this, arguments);
+      };
+    })();
+  </script>
 </head>
 <body>
   <div id="loading">

@@ -222,7 +222,11 @@ class LocalSignalingHost {
       _sendRaw(peer.socket, message);
 
   void _sendRaw(WebSocket socket, Map<String, dynamic> message) {
-    if (socket.readyState == WebSocket.open) socket.add(jsonEncode(message));
+    if (socket.readyState == WebSocket.open) {
+      try {
+        socket.add(jsonEncode(message));
+      } catch (_) {}
+    }
   }
 
   Future<void> stop() async {
